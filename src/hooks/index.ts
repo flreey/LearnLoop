@@ -1,14 +1,17 @@
 /**
  * OpenClaw plugin hook handlers.
  * Implements: handleBeforeTurn — lazy extraction trigger + memory context injection.
+ *             handleAfterTask — reflection generation orchestration and persistence.
  */
 
+import { randomUUID } from 'crypto';
 import type { DB } from '../storage/db.js';
 import type { StorageFacade } from '../storage/facade.js';
 import { lazyExtractionCheck, extractMemories, retrieveMemories } from '../memory/index.js';
 import { insertSessionState, updateSessionState } from '../storage/repository.js';
 import { getConfig } from '../config/index.js';
-import type { MemoryEntry, Message } from '../types/index.js';
+import { generateReflection } from '../reflection/index.js';
+import type { MemoryEntry, Message, TaskSignals, ReflectionEntry } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +27,20 @@ export interface BeforeTurnInput {
 export interface BeforeTurnResult {
   injected_memories: MemoryEntry[];
   extraction_triggered: boolean;
+}
+
+export interface AfterTaskInput {
+  session_key: string;
+  task_type: string;
+  task_summary: string;
+  conversation_history: Message[];
+  signals: TaskSignals;
+  agent_id: string | null;
+}
+
+export interface AfterTaskResult {
+  reflection_id: string | null;
+  outcome: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,4 +133,70 @@ export async function handleBeforeTurn(
     injected_memories: injectedMemories,
     extraction_triggered: extractionTriggered,
   };
+}
+
+// ---------------------------------------------------------------------------
+// handleAfterTask
+// ---------------------------------------------------------------------------
+
+/**
+ * afterTask hook handler.
+ *
+ * Responsibilities:
+ *   1. Resolve task completion signals into a single outcome via resolveOutcome().
+ *   2. Invoke generateReflection() asynchronously (fire-and-forget) to generate
+ *      a structured reflection entry via LLM.
+ *   3. Persist the generated reflection to the SQLite reflections table.
+ *   4. Return reflection_id and outcome immediately (non-blocking).
+ *      On LLM failure, return reflection_id=null, outcome=null.
+ *
+ * Design refs:
+ *   - endpoints[hook-after-task]
+ *   - business_rules[reflection-generation-on-task-complete]
+ *   - constraints[non-blocking-reflection]
+ *   - constraints[silent-degradation]
+ */
+export function handleAfterTask(
+  _db: DB,
+  facade: StorageFacade,
+  input: AfterTaskInput,
+): Promise<AfterTaskResult> {
+  // Fire-and-forget: launch reflection generation asynchronously and return
+  // { reflection_id: null, outcome: null } immediately to the caller.
+  // The caller is never blocked by LLM or persistence latency.
+  // See constraints[non-blocking-reflection].
+
+  // Non-awaited inner async task — runs concurrently, result is discarded
+  generateReflection(
+    input.task_type,
+    input.task_summary,
+    input.conversation_history,
+    input.signals,
+  ).then((raw) => {
+    if (raw === null) return;
+
+    // Persist the generated reflection to SQLite
+    const id = randomUUID();
+    const now = new Date().toISOString();
+
+    const entry: ReflectionEntry = {
+      id,
+      task_type: raw.task_type,
+      task_summary: raw.task_summary,
+      outcome: raw.outcome,
+      signals: JSON.stringify(input.signals),
+      reflection: raw.reflection,
+      lessons: JSON.stringify(raw.lessons),
+      agent_id: input.agent_id,
+      source_session: input.session_key,
+      created_at: now,
+    };
+
+    facade.addReflection(entry);
+  }).catch(() => {
+    // Silent degradation — swallow all errors, never re-throw
+  });
+
+  // Return immediately with null sentinel — caller is not blocked
+  return Promise.resolve({ reflection_id: null, outcome: null });
 }
