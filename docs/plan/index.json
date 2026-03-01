@@ -231,7 +231,7 @@
         }
       ],
       "file": "phases/phase-2.json",
-      "completed_count": 4,
+      "completed_count": 5,
       "task_count": 6,
       "status": "in_progress"
     },
@@ -311,6 +311,6 @@
   },
   "current_focus": {
     "phase_id": 2,
-    "task_id": "TASK-BE-2.4"
+    "task_id": "TASK-BE-2.5"
   }
 }

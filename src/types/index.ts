@@ -38,6 +38,14 @@ export interface ScoredReflectionEntry extends ReflectionEntry {
   score: number;
 }
 
+/**
+ * Reflection entry as returned by the beforeSpawn hook injection result.
+ * `lessons` is parsed from JSON string into a string array for consumer convenience.
+ */
+export interface InjectedReflectionEntry extends Omit<ScoredReflectionEntry, 'lessons'> {
+  lessons: string[];
+}
+
 export interface SessionState {
   session_key: string;
   extracted: number;

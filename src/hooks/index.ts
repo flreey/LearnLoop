@@ -11,7 +11,7 @@ import { lazyExtractionCheck, extractMemories, retrieveMemories } from '../memor
 import { insertSessionState, updateSessionState } from '../storage/repository.js';
 import { getConfig } from '../config/index.js';
 import { generateReflection, retrieveReflections, resolveOutcome } from '../reflection/index.js';
-import type { MemoryEntry, Message, TaskSignals, ReflectionEntry, ScoredReflectionEntry } from '../types/index.js';
+import type { MemoryEntry, Message, TaskSignals, ReflectionEntry, InjectedReflectionEntry } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,7 +51,7 @@ export interface BeforeSpawnInput {
 
 export interface BeforeSpawnResult {
   augmented_task_description: string;
-  injected_reflections: ScoredReflectionEntry[];
+  injected_reflections: InjectedReflectionEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -278,10 +278,30 @@ export async function handleBeforeSpawn(
     };
   }
 
-  // Format injected reflection block
-  const reflectionLines = matchedReflections.map((r, idx) => {
-    return `[${idx + 1}] [${r.task_type}] ${r.task_summary} (${r.outcome}): ${r.reflection}`;
+  // Parse lessons JSON string to array for each matched reflection (AC3)
+  const injectedReflections: InjectedReflectionEntry[] = matchedReflections.map(r => {
+    let lessonsArr: string[] = [];
+    try {
+      const parsed = JSON.parse(r.lessons);
+      lessonsArr = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      lessonsArr = [];
+    }
+    return { ...r, lessons: lessonsArr };
   });
+
+  // Format injected reflection block — include lessons content in augmented description (AC2)
+  const reflectionLines: string[] = [];
+  for (let idx = 0; idx < injectedReflections.length; idx++) {
+    const r = injectedReflections[idx];
+    const header = `[${idx + 1}] [${r.task_type}] ${r.task_summary} (${r.outcome}): ${r.reflection}`;
+    reflectionLines.push(header);
+    if (r.lessons.length > 0) {
+      for (const lesson of r.lessons) {
+        reflectionLines.push(`  - ${lesson}`);
+      }
+    }
+  }
 
   const reflectionBlock = [
     '--- Relevant Past Reflections ---',
@@ -293,6 +313,6 @@ export async function handleBeforeSpawn(
 
   return {
     augmented_task_description: augmentedDescription,
-    injected_reflections: matchedReflections,
+    injected_reflections: injectedReflections,
   };
 }
