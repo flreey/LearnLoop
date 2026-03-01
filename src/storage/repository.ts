@@ -67,6 +67,22 @@ export function getReflectionById(db: DB, id: string): ReflectionEntry | null {
   return row ?? null;
 }
 
+export function updateReflection(
+  db: DB,
+  id: string,
+  fields: Partial<Omit<ReflectionEntry, 'id'>>,
+): void {
+  const entries = Object.entries(fields);
+  if (entries.length === 0) return;
+
+  const setClauses = entries.map(([key]) => `${key} = @${key}`).join(', ');
+  db.prepare(`UPDATE reflections SET ${setClauses} WHERE id = @id`).run({ ...fields, id });
+}
+
+export function deleteReflection(db: DB, id: string): void {
+  db.prepare('DELETE FROM reflections WHERE id = ?').run(id);
+}
+
 // ---------------------------------------------------------------------------
 // SessionState CRUD
 // ---------------------------------------------------------------------------

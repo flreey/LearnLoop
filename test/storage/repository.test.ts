@@ -18,6 +18,8 @@ import {
   getMemoriesByType,
   insertReflection,
   getReflectionById,
+  updateReflection,
+  deleteReflection,
   insertSessionState,
   getSessionStateByKey,
   updateSessionState,
@@ -467,5 +469,126 @@ describe('Database auto-creation integration', () => {
       freshDb.close();
       fs.rmSync(path.dirname(path.dirname(uniquePath)), { recursive: true, force: true });
     }
+  });
+
+  // AC8: sqlite_master contains all three required tables after auto-creation
+  it('auto-created database contains memories, reflections, and session_states tables', () => {
+    const uniquePath = makeNonExistentDbPath();
+    const freshDb = initializeDatabase(uniquePath);
+    try {
+      const tables = freshDb
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .all() as Array<{ name: string }>;
+      const tableNames = tables.map((t) => t.name);
+
+      expect(tableNames).toContain('memories');
+      expect(tableNames).toContain('reflections');
+      expect(tableNames).toContain('session_states');
+    } finally {
+      freshDb.close();
+      fs.rmSync(path.dirname(path.dirname(uniquePath)), { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reflection update and delete (AC4, AC7)
+// ---------------------------------------------------------------------------
+
+describe('Reflection update and delete', () => {
+  const now = new Date().toISOString();
+
+  const sampleReflection = {
+    id: 'ref-upd-001',
+    task_type: 'feature',
+    task_summary: 'Implemented login flow',
+    outcome: 'success' as const,
+    signals: JSON.stringify(['user_feedback:positive']),
+    reflection: 'The approach was straightforward',
+    lessons: JSON.stringify(['keep it simple']),
+    agent_id: 'agent-456',
+    source_session: 'session-update',
+    created_at: now,
+  };
+
+  // AC4: update reflection and outcome fields, re-query returns updated values
+  it('updating a reflection changes reflection and outcome fields, preserves other fields', () => {
+    insertReflection(db, sampleReflection);
+
+    updateReflection(db, 'ref-upd-001', {
+      reflection: 'The root cause required deeper analysis',
+      outcome: 'partial',
+    });
+
+    const result = getReflectionById(db, 'ref-upd-001');
+    expect(result).not.toBeNull();
+    expect(result!.reflection).toBe('The root cause required deeper analysis');
+    expect(result!.outcome).toBe('partial');
+
+    // Other fields must be preserved
+    expect(result!.id).toBe('ref-upd-001');
+    expect(result!.task_type).toBe('feature');
+    expect(result!.task_summary).toBe('Implemented login flow');
+    expect(result!.signals).toBe(sampleReflection.signals);
+    expect(result!.lessons).toBe(sampleReflection.lessons);
+    expect(result!.agent_id).toBe('agent-456');
+    expect(result!.source_session).toBe('session-update');
+    expect(result!.created_at).toBe(now);
+  });
+
+  // AC7: delete a reflection, re-query returns null
+  it('deleting a reflection by id removes it and read returns null', () => {
+    insertReflection(db, { ...sampleReflection, id: 'ref-del-001' });
+    expect(getReflectionById(db, 'ref-del-001')).not.toBeNull();
+
+    deleteReflection(db, 'ref-del-001');
+    expect(getReflectionById(db, 'ref-del-001')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Field constraints and default values (AC9, AC10, AC11)
+// ---------------------------------------------------------------------------
+
+describe('Field constraints and default values', () => {
+  const now = new Date().toISOString();
+
+  // AC9: memories.type only accepts the four valid enum values
+  it('inserting a memory with an invalid type throws or fails', () => {
+    expect(() => {
+      // Use raw db.prepare to bypass TypeScript type guard and test the DB constraint
+      db.prepare(`
+        INSERT INTO memories
+          (id, type, content, subject, confidence, importance,
+           source_session, access_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('bad-type-mem', 'invalid_type', 'content', 'subject', 0.5, 0.5, 'sess', 0, now, now);
+    }).toThrow();
+  });
+
+  // AC10: reflections.outcome only accepts the three valid enum values
+  it('inserting a reflection with an invalid outcome throws or fails', () => {
+    expect(() => {
+      db.prepare(`
+        INSERT INTO reflections
+          (id, task_type, task_summary, outcome, signals, reflection,
+           lessons, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('bad-outcome-ref', 'feat', 'summary', 'invalid_outcome', '[]', 'text', '[]', now);
+    }).toThrow();
+  });
+
+  // AC11: memories defaults: confidence=0.5, importance=0.5, access_count=0
+  it('memory fields confidence, importance, access_count use correct defaults when omitted', () => {
+    db.prepare(`
+      INSERT INTO memories (id, type, content, subject, source_session, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('default-mem-001', 'fact', 'Default value test', 'defaults', 'sess-def', now, now);
+
+    const result = getMemoryById(db, 'default-mem-001');
+    expect(result).not.toBeNull();
+    expect(result!.confidence).toBe(0.5);
+    expect(result!.importance).toBe(0.5);
+    expect(result!.access_count).toBe(0);
   });
 });

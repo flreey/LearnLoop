@@ -7,7 +7,7 @@ export type DB = InstanceType<typeof Database>;
 const MEMORIES_DDL = `
 CREATE TABLE IF NOT EXISTS memories (
   id              TEXT PRIMARY KEY NOT NULL,
-  type            TEXT NOT NULL,
+  type            TEXT NOT NULL CHECK(type IN ('preference', 'fact', 'entity', 'episode')),
   content         TEXT NOT NULL,
   subject         TEXT NOT NULL,
   confidence      REAL NOT NULL DEFAULT 0.5,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS reflections (
   id            TEXT PRIMARY KEY NOT NULL,
   task_type     TEXT NOT NULL,
   task_summary  TEXT NOT NULL,
-  outcome       TEXT NOT NULL,
+  outcome       TEXT NOT NULL CHECK(outcome IN ('success', 'failure', 'partial')),
   signals       TEXT NOT NULL,
   reflection    TEXT NOT NULL,
   lessons       TEXT NOT NULL,
