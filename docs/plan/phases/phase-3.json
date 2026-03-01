@@ -1,0 +1,246 @@
+{
+  "id": 3,
+  "name": "End-to-End Integration & System Verification",
+  "type": "backend",
+  "tasks": [
+    {
+      "id": "TASK-BE-3.1",
+      "title": "Wire all 3 hooks into OpenClaw plugin entry point with unified configuration and error handling",
+      "description": "实现 OpenClaw 插件入口，将 beforeTurn、afterTask、beforeSpawn 三个 hook 统一注册到插件对象中，配置统一的错误处理（silent degradation），确保所有 hook 可被 OpenClaw 主进程正确调用。插件初始化时自动完成存储层、搜索引擎、LLM 客户端的依赖注入。",
+      "acceptance_criteria": [
+        "插件导出对象包含 beforeTurn、afterTask、beforeSpawn 三个回调函数",
+        "调用 beforeTurn 时传入 session_key + conversation_context + previous_session_key + previous_conversation_history，返回 { injected_memories: MemoryEntry[], extraction_triggered: boolean }",
+        "调用 afterTask 时传入 session_key + task_type + task_summary + conversation_history + signals + agent_id，返回 { reflection_id: string | null, outcome: string | null }",
+        "调用 beforeSpawn 时传入 task_description + task_type + agent_id，返回 { augmented_task_description: string, injected_reflections: ReflectionEntry[] }",
+        "beforeTurn 中 memory injection 是同步完成的（返回前 injected_memories 已填充），lazy extraction 是异步触发的（不阻塞返回）",
+        "afterTask 中 reflection generation 是异步触发的（不阻塞返回），但 reflection_id 在 LLM 完成后写入存储",
+        "beforeSpawn 中 reflection retrieval 和 injection 是同步完成的（返回前 augmented_task_description 已拼接）",
+        "任意 hook 内部抛出异常时，异常被捕获并记录日志，不会向 OpenClaw 主进程抛出错误",
+        "beforeTurn 内部 LLM extraction 失败时，hook 仍正常返回 injected_memories（可能为空数组），extraction_triggered 为 false",
+        "afterTask 内部 LLM reflection 失败时，hook 返回 { reflection_id: null, outcome: null }",
+        "插件初始化接受配置对象（含 retrieval weights a/b/c、lambda、db path），配置缺失时使用默认值（a=0.3, b=0.5, c=0.2, lambda=0.01, dbPath=~/.openclaw/learnloop/learnloop.db）"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "插件注册后三个 hook 均可调用",
+          "given": [
+            "插件已通过默认配置初始化"
+          ],
+          "when": "依次调用 beforeTurn、afterTask、beforeSpawn 并传入有效参数",
+          "then": [
+            "三个调用均返回正确结构的响应对象，无异常抛出"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "LLM 服务不可用时所有 hook 静默降级",
+          "given": [
+            "LLM 服务端点返回 500 错误"
+          ],
+          "when": "依次调用 beforeTurn（含 previous_session_key）、afterTask（含有效 signals）",
+          "then": [
+            "beforeTurn 返回 { injected_memories: [], extraction_triggered: false }",
+            "afterTask 返回 { reflection_id: null, outcome: null }",
+            "无异常抛出到调用方"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "存储层不可用时所有 hook 静默降级",
+          "given": [
+            "SQLite 数据库文件权限为只读，写入操作会失败"
+          ],
+          "when": "调用 beforeTurn 并传入有效参数",
+          "then": [
+            "hook 返回响应对象（injected_memories 可能为空数组）",
+            "无异常抛出到调用方"
+          ]
+        }
+      ],
+      "scope": [
+        "插件入口模块",
+        "三个 hook 的统一注册",
+        "依赖注入与初始化",
+        "统一错误处理（silent degradation）",
+        "配置管理与默认值"
+      ],
+      "out_of_scope": [
+        "各 hook 内部的业务逻辑实现（已在 Phase 1/2 完成）",
+        "LLM 客户端实现",
+        "存储层实现"
+      ],
+      "story_id": "STORY-E2E-PIPELINE",
+      "task_role": "integrate",
+      "fr_refs": [
+        "FR-1",
+        "FR-2",
+        "FR-5",
+        "FR-6",
+        "FR-7"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]"
+      ],
+      "depends": [
+        "TASK-BE-1.4",
+        "TASK-BE-2.6"
+      ]
+    },
+    {
+      "id": "TASK-BE-3.2",
+      "title": "End-to-end smoke test: full conversation lifecycle from extraction through injection",
+      "description": "端到端烟测覆盖完整的 LearnLoop 生命周期：Session N 对话产生记忆 → Session N+1 的 beforeTurn 触发懒提取 + 记忆注入 → 任务完成触发 afterTask 反思生成 → 新子任务 beforeSpawn 注入相关反思。验证数据在各模块间正确流转、冲突检测生效、非阻塞约束满足、静默降级有效、检索延迟达标。",
+      "acceptance_criteria": [
+        "Session N+1 的 beforeTurn 调用时，若 previous_session_key 指向未提取的 Session N，extraction_triggered 返回 true，且异步提取完成后 memories 表中存在从 Session N 对话提取的记忆条目",
+        "Session N+1 的 beforeTurn 调用时，injected_memories 中包含与当前 conversation_context 相关的已有记忆（基于 BM25 相关性匹配）",
+        "连续两次提取同一 subject 的记忆时，memories 表中该 subject 只有一条记录（冲突检测 upsert 生效），content 为最新值，created_at 保持不变，updated_at 更新",
+        "被注入的记忆条目的 access_count 递增 1，last_accessed_at 更新为当前时间",
+        "afterTask 调用传入 user_feedback:positive 信号时，异步完成后 reflections 表中新增一条 outcome=success 的反思条目，包含 task_summary 和 lessons 数组",
+        "beforeSpawn 调用时，若 reflections 表中存在与 task_type 和 task_summary 匹配的反思，augmented_task_description 中包含该反思内容",
+        "beforeSpawn 调用时，若 reflections 表中无匹配反思，augmented_task_description 等于原始 task_description，injected_reflections 为空数组",
+        "beforeTurn 的 memory injection 在 hook 返回前完成（同步），lazy extraction 不阻塞 hook 返回（异步）",
+        "afterTask 的 reflection generation 不阻塞 hook 返回（异步）",
+        "memory retrieval 延迟 < 100ms（1000 条记忆数据量下）",
+        "LLM 调用全部失败时，三个 hook 均正常返回默认响应，无异常抛出"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "e2e",
+          "name": "完整记忆提取-注入生命周期",
+          "given": [
+            "Session N 的对话历史包含用户偏好信息（如 '用户偏好中文沟通'）",
+            "Session N 尚未被提取"
+          ],
+          "when": "以 Session N+1 身份调用 beforeTurn，传入 previous_session_key 指向 Session N，conversation_context 包含 '语言' 关键词",
+          "then": [
+            "返回的 extraction_triggered 为 true",
+            "等待异步提取完成后，再次调用 beforeTurn（无 previous_session_key），injected_memories 中包含与 '语言' 相关的记忆条目"
+          ]
+        },
+        {
+          "type": "e2e",
+          "name": "完整反思生成-注入生命周期",
+          "given": [
+            "reflections 表为空"
+          ],
+          "when": "调用 afterTask 传入 task_type='code'、task_summary='替换 PDF 库'、signals 包含 user_feedback:positive，等待异步完成后调用 beforeSpawn 传入 task_type='code'、task_description 包含 'PDF'",
+          "then": [
+            "beforeSpawn 返回的 augmented_task_description 长度大于原始 task_description",
+            "injected_reflections 数组非空"
+          ]
+        },
+        {
+          "type": "e2e",
+          "name": "记忆冲突更新后注入最新值",
+          "given": [
+            "memories 表中已存在 subject='flreey' type='preference' content='偏好英文'"
+          ],
+          "when": "触发提取产生 subject='flreey' type='preference' content='偏好中文' 的新记忆，提取完成后调用 beforeTurn 查询 'flreey' 相关上下文",
+          "then": [
+            "injected_memories 中 subject='flreey' 的记忆 content 为 '偏好中文'（最新值）",
+            "memories 表中 subject='flreey' type='preference' 仅一条记录"
+          ]
+        },
+        {
+          "type": "e2e",
+          "name": "LLM 全部不可用时端到端静默降级",
+          "given": [
+            "LLM 服务返回错误（模拟网络故障）",
+            "memories 表中已有若干条记忆"
+          ],
+          "when": "依次调用 beforeTurn（含 previous_session_key）、afterTask（含 signals）、beforeSpawn",
+          "then": [
+            "beforeTurn 返回 injected_memories（来自已有记忆的检索，不依赖 LLM）和 extraction_triggered=false",
+            "afterTask 返回 reflection_id=null",
+            "beforeSpawn 返回原始 task_description（无新反思注入）",
+            "所有调用无异常抛出"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "1000 条记忆下检索延迟达标",
+          "given": [
+            "memories 表中预置 1000 条记忆条目"
+          ],
+          "when": "调用 beforeTurn 进行 memory retrieval",
+          "then": [
+            "hook 返回耗时中 memory retrieval 部分 < 100ms"
+          ]
+        }
+      ],
+      "scope": [
+        "beforeTurn → lazy extraction → memory injection 全链路",
+        "afterTask → reflection generation → storage 全链路",
+        "beforeSpawn → reflection retrieval → injection 全链路",
+        "冲突检测 upsert 端到端验证",
+        "access tracking 端到端验证",
+        "非阻塞约束验证",
+        "静默降级端到端验证",
+        "检索延迟性能验证"
+      ],
+      "out_of_scope": [
+        "LLM prompt 质量评估",
+        "实际 GPT-4o-mini 调用（使用 mock）",
+        "ExpeL 规则蒸馏",
+        "向量嵌入检索"
+      ],
+      "story_id": "STORY-E2E-PIPELINE",
+      "task_role": "verify",
+      "fr_refs": [
+        "FR-1",
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5",
+        "FR-6",
+        "FR-7"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY",
+        "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-CONST-LLM-COST-TARGET"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=llm-cost-target]",
+        "docs/design/backend.json#constraints[id=non-blocking-extraction]",
+        "docs/design/backend.json#constraints[id=non-blocking-reflection]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]"
+      ],
+      "depends": [
+        "TASK-BE-3.1",
+        "TASK-BE-0.5",
+        "TASK-BE-1.4",
+        "TASK-BE-2.6"
+      ]
+    }
+  ]
+}

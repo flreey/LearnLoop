@@ -1,0 +1,832 @@
+{
+  "conventions": {
+    "architecture": "in-process-plugin",
+    "module_structure": "src/{name}/",
+    "module_files": [
+      "index.ts",
+      "service.ts",
+      "repository.ts",
+      "types.ts",
+      "prompts.ts",
+      "test.ts"
+    ],
+    "error_handling": "try/catch with silent degradation — LLM and extraction errors logged but never propagated to host process",
+    "naming": "files: kebab-case, classes: PascalCase, vars: camelCase, tables: snake_case"
+  },
+  "tech_stack": {
+    "language": "TypeScript",
+    "runtime": "Node.js 20",
+    "framework": "OpenClaw Plugin SDK (in-process hooks)",
+    "database": "SQLite via better-sqlite3",
+    "orm": "raw SQL via better-sqlite3 (no ORM)"
+  },
+  "entities": [
+    {
+      "id": "memory",
+      "table": "memories",
+      "fields": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": true,
+          "not_null": true
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "content",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "confidence",
+          "type": "REAL",
+          "not_null": true,
+          "default": "0.5"
+        },
+        {
+          "name": "importance",
+          "type": "REAL",
+          "not_null": true,
+          "default": "0.5"
+        },
+        {
+          "name": "source_session",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "access_count",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "0"
+        },
+        {
+          "name": "last_accessed_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true
+        }
+      ],
+      "relations": [
+        {
+          "to": "session_state",
+          "type": "belongs_to",
+          "fk": "source_session"
+        }
+      ],
+      "indexes": [
+        {
+          "fields": [
+            "subject"
+          ],
+          "unique": false
+        },
+        {
+          "fields": [
+            "type"
+          ],
+          "unique": false
+        },
+        {
+          "fields": [
+            "subject",
+            "type"
+          ],
+          "unique": false
+        },
+        {
+          "fields": [
+            "importance"
+          ],
+          "unique": false
+        },
+        {
+          "fields": [
+            "updated_at"
+          ],
+          "unique": false
+        }
+      ]
+    },
+    {
+      "id": "reflection",
+      "table": "reflections",
+      "fields": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "pk": true,
+          "not_null": true
+        },
+        {
+          "name": "task_type",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "task_summary",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "signals",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "reflection",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "lessons",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "agent_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "source_session",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true
+        }
+      ],
+      "relations": [
+        {
+          "to": "session_state",
+          "type": "belongs_to",
+          "fk": "source_session"
+        }
+      ],
+      "indexes": [
+        {
+          "fields": [
+            "task_type"
+          ],
+          "unique": false
+        },
+        {
+          "fields": [
+            "agent_id"
+          ],
+          "unique": false
+        },
+        {
+          "fields": [
+            "outcome"
+          ],
+          "unique": false
+        },
+        {
+          "fields": [
+            "created_at"
+          ],
+          "unique": false
+        }
+      ]
+    },
+    {
+      "id": "session_state",
+      "table": "session_states",
+      "fields": [
+        {
+          "name": "session_key",
+          "type": "TEXT",
+          "pk": true,
+          "not_null": true
+        },
+        {
+          "name": "extracted",
+          "type": "INTEGER",
+          "not_null": true,
+          "default": "0"
+        },
+        {
+          "name": "conversation_hash",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "not_null": true
+        }
+      ],
+      "relations": [
+        {
+          "to": "memory",
+          "type": "has_many",
+          "fk": "source_session"
+        },
+        {
+          "to": "reflection",
+          "type": "has_many",
+          "fk": "source_session"
+        }
+      ],
+      "indexes": [
+        {
+          "fields": [
+            "extracted"
+          ],
+          "unique": false
+        }
+      ]
+    }
+  ],
+  "endpoints": [
+    {
+      "id": "hook-before-turn",
+      "method": "HOOK",
+      "path": "beforeTurn",
+      "auth": "none",
+      "request": {
+        "session_key": "string",
+        "conversation_context": "string",
+        "previous_session_key": "string | null",
+        "previous_conversation_history": "Message[] | null"
+      },
+      "response": {
+        "injected_memories": "MemoryEntry[]",
+        "extraction_triggered": "boolean"
+      },
+      "description": "Synchronously injects relevant memories into context. Asynchronously triggers lazy memory extraction from previous session if unprocessed."
+    },
+    {
+      "id": "hook-after-task",
+      "method": "HOOK",
+      "path": "afterTask",
+      "auth": "none",
+      "request": {
+        "session_key": "string",
+        "task_type": "string",
+        "task_summary": "string",
+        "conversation_history": "Message[]",
+        "signals": {
+          "user_feedback": "string | null",
+          "review_result": "string | null",
+          "was_respawned": "boolean",
+          "timed_out": "boolean"
+        },
+        "agent_id": "string | null"
+      },
+      "response": {
+        "reflection_id": "string | null",
+        "outcome": "string | null"
+      },
+      "description": "Asynchronously generates a reflection entry from task completion signals via LLM analysis."
+    },
+    {
+      "id": "hook-before-spawn",
+      "method": "HOOK",
+      "path": "beforeSpawn",
+      "auth": "none",
+      "request": {
+        "task_description": "string",
+        "task_type": "string",
+        "agent_id": "string | null"
+      },
+      "response": {
+        "augmented_task_description": "string",
+        "injected_reflections": "ReflectionEntry[]"
+      },
+      "description": "Synchronously retrieves and injects relevant past reflections into the task description before subtask dispatch."
+    },
+    {
+      "id": "internal-extract-memories",
+      "method": "INTERNAL",
+      "path": "extractMemories",
+      "auth": "none",
+      "request": {
+        "session_key": "string",
+        "conversation_history": "Message[]"
+      },
+      "response": {
+        "extracted": "MemoryEntry[]",
+        "conflicts_resolved": "number"
+      },
+      "errors": {
+        "500": "LLM call failed — silent degradation, returns empty array"
+      },
+      "description": "Internal async function: sends conversation to LLM for memory extraction, handles conflict detection and upsert."
+    },
+    {
+      "id": "internal-retrieve-memories",
+      "method": "INTERNAL",
+      "path": "retrieveMemories",
+      "auth": "none",
+      "request": {
+        "query": "string",
+        "limit": "number",
+        "weights": {
+          "recency": "number",
+          "relevance": "number",
+          "importance": "number"
+        }
+      },
+      "response": {
+        "memories": "ScoredMemoryEntry[]"
+      },
+      "description": "Internal function: tri-dimensional retrieval combining recency decay, BM25 relevance, and importance scoring."
+    },
+    {
+      "id": "internal-retrieve-reflections",
+      "method": "INTERNAL",
+      "path": "retrieveReflections",
+      "auth": "none",
+      "request": {
+        "task_type": "string",
+        "task_summary": "string",
+        "limit": "number"
+      },
+      "response": {
+        "reflections": "ScoredReflectionEntry[]"
+      },
+      "description": "Internal function: BM25 search over reflections by task_type and task_summary."
+    },
+    {
+      "id": "internal-generate-reflection",
+      "method": "INTERNAL",
+      "path": "generateReflection",
+      "auth": "none",
+      "request": {
+        "task_type": "string",
+        "task_summary": "string",
+        "conversation_history": "Message[]",
+        "signals": "TaskSignals"
+      },
+      "response": {
+        "reflection": "ReflectionEntry | null"
+      },
+      "errors": {
+        "500": "LLM call failed — silent degradation, returns null"
+      },
+      "description": "Internal async function: sends task context and signals to LLM for reflection generation."
+    }
+  ],
+  "algorithms": [
+    {
+      "id": "tri-dimensional-retrieval",
+      "name": "Tri-Dimensional Memory Retrieval Scoring",
+      "inputs": [
+        "query_string",
+        "memory_entries[]",
+        "weights {a, b, c}",
+        "lambda"
+      ],
+      "outputs": [
+        "scored_memory_entries[] sorted by score descending"
+      ],
+      "steps": [
+        "1. Build or update MiniSearch index with all memory entries (content field indexed)",
+        "2. Execute BM25 search with query_string to get relevance scores",
+        "3. For each memory entry m:",
+        "   3a. recency(m) = exp(-lambda * hours_since(m.last_accessed_at || m.updated_at))",
+        "   3b. relevance(m) = normalized BM25 score from MiniSearch (0-1 range)",
+        "   3c. importance(m) = m.importance (already 0-1)",
+        "   3d. score(m) = a * recency(m) + b * relevance(m) + c * importance(m)",
+        "4. Sort entries by score descending",
+        "5. Return top-N entries",
+        "6. Update access_count and last_accessed_at for returned entries"
+      ],
+      "description": "Weighted scoring combining time decay (recency), BM25 text relevance, and LLM-assigned importance. Default weights: a=0.3, b=0.5, c=0.2, lambda=0.01."
+    },
+    {
+      "id": "signal-outcome-resolution",
+      "name": "Task Outcome Signal Resolution",
+      "inputs": [
+        "user_feedback: string|null",
+        "review_result: string|null",
+        "was_respawned: boolean",
+        "timed_out: boolean"
+      ],
+      "outputs": [
+        "outcome: 'success' | 'failure' | 'partial'"
+      ],
+      "steps": [
+        "1. Initialize failure_signals = 0, success_signals = 0",
+        "2. If timed_out is true → failure_signals += 1",
+        "3. If was_respawned is true → failure_signals += 1",
+        "4. If review_result == 'FAIL' → failure_signals += 1",
+        "5. If review_result == 'PASS' → success_signals += 1",
+        "6. If user_feedback matches positive patterns ('谢谢','thanks','good','great') → success_signals += 1",
+        "7. If user_feedback matches negative patterns ('不对','重来','wrong','redo') → failure_signals += 1",
+        "8. If failure_signals > 0 and success_signals > 0 → outcome = 'partial'",
+        "9. If failure_signals > 0 and success_signals == 0 → outcome = 'failure'",
+        "10. If success_signals > 0 and failure_signals == 0 → outcome = 'success'",
+        "11. If both are 0 → outcome = 'partial' (ambiguous)"
+      ],
+      "description": "Resolves potentially conflicting task completion signals into a single outcome classification for reflection generation."
+    },
+    {
+      "id": "memory-conflict-detection",
+      "name": "Memory Conflict Detection and Upsert",
+      "inputs": [
+        "new_memory: MemoryEntry",
+        "existing_memories: MemoryEntry[]"
+      ],
+      "outputs": [
+        "action: 'insert' | 'update'",
+        "target_id: string | null"
+      ],
+      "steps": [
+        "1. Query existing memories WHERE subject = new_memory.subject",
+        "2. If no existing memories found → action = 'insert', target_id = null",
+        "3. If existing memories found:",
+        "   3a. Filter to same type (preference, fact, entity, episode)",
+        "   3b. If matching entry exists with same subject and type → action = 'update', target_id = existing.id",
+        "   3c. Update existing entry: content = new_memory.content, confidence = new_memory.confidence, importance = new_memory.importance, updated_at = now()",
+        "4. If no same-type match but same subject exists → action = 'insert' (different memory type for same subject is not a conflict)"
+      ],
+      "description": "Detects when a new memory contradicts an existing memory for the same subject and type, performing an update instead of a duplicate insert."
+    },
+    {
+      "id": "lazy-extraction-check",
+      "name": "Lazy Extraction Eligibility Check",
+      "inputs": [
+        "previous_session_key: string | null"
+      ],
+      "outputs": [
+        "should_extract: boolean",
+        "session_key: string | null"
+      ],
+      "steps": [
+        "1. If previous_session_key is null → should_extract = false",
+        "2. Query session_states WHERE session_key = previous_session_key",
+        "3. If no record found → should_extract = true (new session, not yet processed)",
+        "4. If record found AND extracted = 0 → should_extract = true",
+        "5. If record found AND extracted = 1 → should_extract = false",
+        "6. Return should_extract and session_key"
+      ],
+      "description": "Determines whether the previous session's conversation history needs memory extraction, implementing the lazy extraction strategy."
+    }
+  ],
+  "integrations": [
+    {
+      "id": "llm-memory-extraction",
+      "type": "llm",
+      "provider": "OpenClaw LLM Proxy (GPT-4o-mini)",
+      "protocol": {
+        "input": {
+          "system_prompt": "Memory extraction prompt with type definitions (preference|fact|entity|episode)",
+          "user_content": "Conversation history from previous session",
+          "response_format": "JSON array of memory entries"
+        },
+        "output": {
+          "memories": [
+            {
+              "type": "preference|fact|entity|episode",
+              "content": "string",
+              "subject": "string",
+              "confidence": "number (0-1)",
+              "importance": "number (0-1)"
+            }
+          ]
+        },
+        "error_handling": "Silent degradation — log error, return empty array, conversation proceeds normally",
+        "streaming": false
+      },
+      "description": "Analyzes conversation history to extract memorable content. Cost target < $0.002 per call. Called asynchronously during lazy extraction."
+    },
+    {
+      "id": "llm-reflection-generation",
+      "type": "llm",
+      "provider": "OpenClaw LLM Proxy (GPT-4o-mini)",
+      "protocol": {
+        "input": {
+          "system_prompt": "Reflection generation prompt with Reflexion methodology",
+          "user_content": "Task context, conversation history, completion signals, resolved outcome",
+          "response_format": "JSON reflection entry"
+        },
+        "output": {
+          "task_type": "code|research|deployment",
+          "task_summary": "string",
+          "outcome": "success|failure|partial",
+          "reflection": "string",
+          "lessons": [
+            "string"
+          ]
+        },
+        "error_handling": "Silent degradation — log error, return null, task proceeds normally",
+        "streaming": false
+      },
+      "description": "Generates structured reflection from task completion context using Reflexion methodology. Cost target < $0.002 per call."
+    },
+    {
+      "id": "bm25-search-engine",
+      "type": "search",
+      "provider": "MiniSearch",
+      "protocol": {
+        "input": {
+          "documents": "Array of {id, content} objects",
+          "query": "Search query string",
+          "options": "{ fields: ['content'], boost: {}, fuzzy: 0.2, prefix: true }"
+        },
+        "output": {
+          "results": "Array of {id, score} sorted by BM25 relevance"
+        },
+        "error_handling": "Return empty results on error — retrieval proceeds with recency and importance only",
+        "streaming": false
+      },
+      "description": "In-memory BM25 text search via MiniSearch library (~8KB). Must support CJK tokenization. Rebuilt on startup from SQLite data."
+    }
+  ],
+  "constraints": [
+    {
+      "id": "retrieval-latency",
+      "scope": "memory retrieval and reflection retrieval",
+      "rule": "Total retrieval latency must be < 100ms for up to 1000 entries",
+      "enforcement": "Performance benchmark test; MiniSearch index kept in memory; SQLite queries use indexes"
+    },
+    {
+      "id": "non-blocking-extraction",
+      "scope": "memory extraction (beforeTurn hook)",
+      "rule": "Memory extraction from previous session must run asynchronously and must not block the current conversation turn",
+      "enforcement": "Fire-and-forget async call; extraction promise not awaited in hook return path"
+    },
+    {
+      "id": "non-blocking-reflection",
+      "scope": "reflection generation (afterTask hook)",
+      "rule": "Reflection generation must run asynchronously and must not block task completion flow",
+      "enforcement": "Fire-and-forget async call; reflection promise not awaited in hook return path"
+    },
+    {
+      "id": "synchronous-injection",
+      "scope": "memory injection (beforeTurn) and reflection injection (beforeSpawn)",
+      "rule": "Context injection must complete synchronously before the turn/spawn proceeds",
+      "enforcement": "Hook handlers await retrieval and injection before returning"
+    },
+    {
+      "id": "llm-cost-target",
+      "scope": "all LLM calls (extraction and reflection)",
+      "rule": "Each LLM call must cost < $0.002 (use GPT-4o-mini, keep prompts concise)",
+      "enforcement": "Prompt size limits in extraction and reflection prompt templates"
+    },
+    {
+      "id": "data-locality",
+      "scope": "all data storage",
+      "rule": "All data must be stored locally at ~/.openclaw/learnloop/ — no external data transmission except LLM API calls",
+      "enforcement": "SQLite database path hardcoded to ~/.openclaw/learnloop/learnloop.db; no network storage calls"
+    },
+    {
+      "id": "storage-footprint",
+      "scope": "database size",
+      "rule": "Per-user storage footprint < 10MB/month (estimated 1000 memories + 200 reflections)",
+      "enforcement": "Monitoring; conflict detection reduces duplicate entries"
+    },
+    {
+      "id": "silent-degradation",
+      "scope": "all LLM calls and non-critical operations",
+      "rule": "Any failure in memory extraction, reflection generation, or retrieval must not impact normal conversation or task flow",
+      "enforcement": "All LLM calls wrapped in try/catch; errors logged but never re-thrown to host process"
+    },
+    {
+      "id": "db-auto-create",
+      "scope": "database initialization",
+      "rule": "If database file or directory does not exist, auto-create on first access",
+      "enforcement": "mkdirSync for ~/.openclaw/learnloop/ and CREATE TABLE IF NOT EXISTS in initialization"
+    }
+  ],
+  "seed_data": {
+    "retrieval_config": [
+      {
+        "key": "recency_weight",
+        "value": 0.3,
+        "description": "Weight for recency component in tri-dimensional retrieval (a)"
+      },
+      {
+        "key": "relevance_weight",
+        "value": 0.5,
+        "description": "Weight for BM25 relevance component in tri-dimensional retrieval (b)"
+      },
+      {
+        "key": "importance_weight",
+        "value": 0.2,
+        "description": "Weight for importance component in tri-dimensional retrieval (c)"
+      },
+      {
+        "key": "decay_lambda",
+        "value": 0.01,
+        "description": "Time decay coefficient for recency calculation"
+      },
+      {
+        "key": "memory_injection_limit",
+        "value": 10,
+        "description": "Maximum number of memories to inject per turn"
+      },
+      {
+        "key": "reflection_injection_limit",
+        "value": 5,
+        "description": "Maximum number of reflections to inject per spawn"
+      }
+    ],
+    "memory_types": [
+      {
+        "type": "preference",
+        "description": "User preferences and working style choices"
+      },
+      {
+        "type": "fact",
+        "description": "Factual information about the user or project"
+      },
+      {
+        "type": "entity",
+        "description": "Named entities — people, projects, tools, services"
+      },
+      {
+        "type": "episode",
+        "description": "Specific events or interactions worth remembering"
+      }
+    ],
+    "outcome_types": [
+      {
+        "outcome": "success",
+        "description": "Task completed successfully based on positive signals"
+      },
+      {
+        "outcome": "failure",
+        "description": "Task failed based on negative signals"
+      },
+      {
+        "outcome": "partial",
+        "description": "Mixed or ambiguous signals — task partially succeeded"
+      }
+    ],
+    "signal_patterns": [
+      {
+        "pattern": "user_feedback:positive",
+        "keywords": [
+          "谢谢",
+          "thanks",
+          "good",
+          "great",
+          "perfect",
+          "nice"
+        ],
+        "weight": "success"
+      },
+      {
+        "pattern": "user_feedback:negative",
+        "keywords": [
+          "不对",
+          "重来",
+          "wrong",
+          "redo",
+          "fix",
+          "错"
+        ],
+        "weight": "failure"
+      },
+      {
+        "pattern": "review:PASS",
+        "source": "sub-task review result",
+        "weight": "success"
+      },
+      {
+        "pattern": "review:FAIL",
+        "source": "sub-task review result",
+        "weight": "failure"
+      },
+      {
+        "pattern": "respawn",
+        "source": "task re-spawn detection",
+        "weight": "failure"
+      },
+      {
+        "pattern": "timeout",
+        "source": "task timeout detection",
+        "weight": "failure"
+      }
+    ]
+  },
+  "business_rules": [
+    {
+      "id": "lazy-extraction-trigger",
+      "name": "Lazy Memory Extraction Trigger",
+      "trigger": "beforeTurn hook fires",
+      "precondition": {
+        "previous_session_key_exists": true,
+        "previous_session_not_yet_extracted": true
+      },
+      "effect": {
+        "action": "Fire async LLM extraction call for previous session conversation history",
+        "mark_session_extracted": true,
+        "non_blocking": true
+      },
+      "description": "Memory extraction from session N occurs at the start of session N+1, eliminating timer complexity. Extraction is async and non-blocking."
+    },
+    {
+      "id": "memory-injection-on-turn",
+      "name": "Memory Context Injection on Turn Start",
+      "trigger": "beforeTurn hook fires",
+      "precondition": {
+        "conversation_context_available": true
+      },
+      "effect": {
+        "action": "Execute tri-dimensional retrieval with conversation context as query",
+        "inject_top_n_memories": "into system prompt or context",
+        "synchronous": true,
+        "skip_if_empty": true
+      },
+      "description": "Retrieve and inject relevant memories into conversation context before each turn. Synchronous — must complete before turn proceeds."
+    },
+    {
+      "id": "reflection-generation-on-task-complete",
+      "name": "Post-Task Reflection Generation",
+      "trigger": "afterTask hook fires",
+      "precondition": {
+        "task_context_available": true,
+        "at_least_one_signal_present": true
+      },
+      "effect": {
+        "action": "Resolve signals to outcome, then async LLM call to generate reflection",
+        "write_reflection_to_db": true,
+        "non_blocking": true
+      },
+      "description": "Automatically generates a structured reflection after task completion using Reflexion methodology. Async and non-blocking."
+    },
+    {
+      "id": "reflection-injection-on-spawn",
+      "name": "Reflection Injection Before Subtask Dispatch",
+      "trigger": "beforeSpawn hook fires",
+      "precondition": {
+        "task_description_available": true
+      },
+      "effect": {
+        "action": "BM25 search reflections by task_type and task_summary",
+        "inject_relevant_reflections": "append to task description",
+        "synchronous": true,
+        "skip_if_empty": true
+      },
+      "description": "Inject relevant past reflections into task description before spawning subtasks. Synchronous — must complete before spawn proceeds."
+    },
+    {
+      "id": "memory-conflict-upsert",
+      "name": "Memory Conflict Detection and Update",
+      "trigger": "new memory extracted by LLM",
+      "precondition": {
+        "existing_memory_same_subject_and_type": true
+      },
+      "effect": {
+        "action": "Update existing entry instead of inserting duplicate",
+        "update_fields": [
+          "content",
+          "confidence",
+          "importance",
+          "updated_at"
+        ],
+        "preserve_fields": [
+          "id",
+          "created_at",
+          "source_session",
+          "access_count"
+        ]
+      },
+      "description": "When a new memory conflicts with an existing memory for the same subject and type, update the existing entry rather than creating a duplicate."
+    },
+    {
+      "id": "access-tracking",
+      "name": "Memory Access Count and Timestamp Tracking",
+      "trigger": "memory retrieved and returned by tri-dimensional retrieval",
+      "precondition": {
+        "memory_included_in_top_n_results": true
+      },
+      "effect": {
+        "action": "Increment access_count by 1, set last_accessed_at to current timestamp"
+      },
+      "description": "Track memory access patterns to support recency-based scoring in future retrievals."
+    }
+  ]
+}

@@ -1,0 +1,510 @@
+{
+  "id": 2,
+  "name": "Self-Learning — Reflection Generation & Injection",
+  "type": "backend",
+  "tasks": [
+    {
+      "id": "TASK-BE-2.1",
+      "title": "Implement signal-outcome resolution and LLM reflection generation",
+      "description": "Implement the signal-outcome resolution algorithm that classifies task completion signals into success/failure/partial outcomes, and the LLM-based reflection generation function that produces structured reflection entries from task context. Includes silent degradation on LLM failure.",
+      "acceptance_criteria": [
+        "当 timed_out=true 且无正向信号时，outcome 解析为 'failure'",
+        "当 was_respawned=true 且无正向信号时，outcome 解析为 'failure'",
+        "当 review_result='FAIL' 且无正向信号时，outcome 解析为 'failure'",
+        "当 review_result='PASS' 且无负向信号时，outcome 解析为 'success'",
+        "当 user_feedback 匹配正向模式（'谢谢','thanks','good','great','perfect','nice'）且无负向信号时，outcome 为 'success'",
+        "当 user_feedback 匹配负向模式（'不对','重来','wrong','redo','fix','错'）且无正向信号时，outcome 为 'failure'",
+        "当同时存在正向和负向信号时，outcome 为 'partial'",
+        "当所有信号均为空/false 时，outcome 为 'partial'",
+        "reflection 生成函数接收 task_type、task_summary、conversation_history、signals，返回包含 task_type、task_summary、outcome、reflection、lessons 字段的结构化对象",
+        "LLM 调用失败时返回 null，不抛出异常",
+        "reflection 生成过程为异步非阻塞执行"
+      ],
+      "bdd_scenarios": [],
+      "scope": [
+        "signal-outcome 解析算法（含正向/负向关键词模式匹配）",
+        "LLM reflection 生成函数",
+        "LLM 调用失败的静默降级处理"
+      ],
+      "out_of_scope": [
+        "afterTask hook 接线",
+        "reflection 的 BM25 检索",
+        "beforeSpawn hook 注入"
+      ],
+      "story_id": "STORY-REFLECTION-GENERATION",
+      "task_role": "implement",
+      "fr_refs": [
+        "FR-6"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-INTERNAL-GENERATE-REFLECTION",
+        "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-RULE-REFLECTION-GENERATION-ON-TASK-COMPLETE",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-SEED-OUTCOME-TYPES",
+        "CAP-BE-SEED-SIGNAL-PATTERNS"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#constraints[id=non-blocking-reflection]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=internal-generate-reflection]",
+        "docs/design/backend.json#integrations[id=llm-reflection-generation]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "depends": [
+        "TASK-BE-0.5"
+      ],
+      "status": "in_progress",
+      "error": "Implement step failed"
+    },
+    {
+      "id": "TASK-BE-2.2",
+      "title": "Wire afterTask hook to orchestrate reflection generation and storage",
+      "description": "Implement the afterTask hook handler that receives task completion context, invokes signal-outcome resolution and LLM reflection generation, and persists the resulting reflection entry to SQLite. The hook must be non-blocking — task completion proceeds regardless of reflection generation result.",
+      "acceptance_criteria": [
+        "afterTask hook 接收 session_key、task_type、task_summary、conversation_history、signals、agent_id 参数",
+        "hook 调用 signal-outcome 解析得到 outcome，再调用 reflection 生成函数",
+        "生成的 reflection 写入 SQLite reflections 表，包含 id、task_type、task_summary、outcome、signals、reflection、lessons、agent_id、created_at 字段",
+        "hook 返回 reflection_id 和 outcome（反映生成结果）",
+        "当至少一个信号存在时触发 reflection 生成流程",
+        "当所有信号均为空/false 时仍触发 reflection 生成（outcome 解析为 partial）",
+        "LLM 反射生成失败时 hook 返回 reflection_id=null、outcome=null，不影响调用方",
+        "hook 执行不阻塞调用方（异步执行，调用方无需等待完成）"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "任务完成后自动生成并存储 reflection",
+          "given": [
+            "存储层已初始化",
+            "LLM 服务可用"
+          ],
+          "when": "afterTask hook 被调用，携带 task_type='code'、task_summary='实现登录功能'、user_feedback='谢谢'",
+          "then": [
+            "reflections 表中新增一条记录",
+            "该记录 outcome 为 'success'",
+            "该记录包含非空 reflection 文本和 lessons 数组"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "LLM 不可用时静默降级",
+          "given": [
+            "存储层已初始化",
+            "LLM 服务不可用"
+          ],
+          "when": "afterTask hook 被调用，携带有效信号",
+          "then": [
+            "hook 返回 reflection_id=null",
+            "reflections 表无新增记录",
+            "无异常抛出"
+          ]
+        }
+      ],
+      "scope": [
+        "afterTask hook handler 实现",
+        "hook 到 signal-outcome 解析和 reflection 生成的编排",
+        "reflection 持久化到 SQLite"
+      ],
+      "out_of_scope": [
+        "signal-outcome 解析算法本身（前置 task 已实现）",
+        "LLM reflection 生成函数本身（前置 task 已实现）",
+        "beforeSpawn hook"
+      ],
+      "story_id": "STORY-REFLECTION-GENERATION",
+      "task_role": "implement",
+      "fr_refs": [
+        "FR-6"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-INTERNAL-GENERATE-REFLECTION",
+        "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-RULE-REFLECTION-GENERATION-ON-TASK-COMPLETE",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-SEED-OUTCOME-TYPES",
+        "CAP-BE-SEED-SIGNAL-PATTERNS"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#constraints[id=non-blocking-reflection]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=internal-generate-reflection]",
+        "docs/design/backend.json#integrations[id=llm-reflection-generation]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "depends": [
+        "TASK-BE-2.1"
+      ]
+    },
+    {
+      "id": "TASK-BE-2.3",
+      "title": "Implement reflection BM25 retrieval and beforeSpawn hook injection",
+      "description": "Implement BM25-based reflection retrieval that searches reflections by task_type and task_summary, and the beforeSpawn hook handler that retrieves relevant reflections and appends them to the task description before subtask dispatch. The hook is synchronous — spawn must wait for injection to complete.",
+      "acceptance_criteria": [
+        "reflection 检索函数接收 task_type、task_summary、limit 参数，返回按 BM25 相关性排序的 reflection 列表",
+        "BM25 搜索同时在 task_type 和 task_summary 字段上进行匹配",
+        "检索结果数量不超过 limit 参数指定的上限",
+        "无匹配 reflection 时返回空数组",
+        "beforeSpawn hook 接收 task_description、task_type、agent_id 参数",
+        "hook 调用 reflection 检索，将匹配的 reflection 文本追加到 task_description 中",
+        "hook 返回 augmented_task_description（包含原始描述 + 注入的 reflection）和 injected_reflections 数组",
+        "无相关 reflection 时 augmented_task_description 与原始 task_description 相同，injected_reflections 为空数组",
+        "beforeSpawn hook 为同步执行——必须在返回后 spawn 才能继续",
+        "reflection 检索延迟 < 100ms（≤ 1000 条 reflection 数据量下）"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "spawn 前注入相关历史 reflection",
+          "given": [
+            "reflections 表中存在 task_type='code' 的多条 reflection 记录",
+            "存储层和搜索引擎已初始化"
+          ],
+          "when": "beforeSpawn hook 被调用，携带 task_type='code'、task_description='实现用户注册'",
+          "then": [
+            "返回的 augmented_task_description 长度大于原始 task_description",
+            "injected_reflections 数组非空",
+            "augmented_task_description 包含原始 task_description 内容"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "无相关 reflection 时原样返回",
+          "given": [
+            "reflections 表为空"
+          ],
+          "when": "beforeSpawn hook 被调用，携带任意 task_description 和 task_type",
+          "then": [
+            "augmented_task_description 与输入 task_description 完全相同",
+            "injected_reflections 为空数组"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "reflection 检索在延迟约束内完成",
+          "given": [
+            "reflections 表中存在 500 条 reflection 记录"
+          ],
+          "when": "beforeSpawn hook 被调用",
+          "then": [
+            "hook 在 100ms 内返回响应"
+          ]
+        }
+      ],
+      "scope": [
+        "reflection BM25 检索函数",
+        "beforeSpawn hook handler 实现",
+        "reflection 文本注入到 task_description 的格式化逻辑"
+      ],
+      "out_of_scope": [
+        "BM25 搜索引擎初始化（Phase 0 已实现）",
+        "reflection 生成逻辑（同 phase 前置 task 已实现）",
+        "向量/cosine 相似度检索（Phase 2 后续升级）"
+      ],
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "implement",
+      "fr_refs": [
+        "FR-7"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-API-INTERNAL-RETRIEVE-REFLECTIONS",
+        "CAP-BE-RULE-REFLECTION-INJECTION-ON-SPAWN",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]",
+        "docs/design/backend.json#endpoints[id=internal-retrieve-reflections]"
+      ],
+      "depends": [],
+      "status": "pending",
+      "error": "Implement step failed"
+    },
+    {
+      "id": "TASK-BE-2.4",
+      "title": "验证 afterTask hook 触发反思生成完整流程：信号解析、LLM 调用、存储写入",
+      "description": "端到端验证 afterTask hook 被调用后，信号被正确解析为 outcome，LLM 生成反思条目，反思被写入 SQLite reflections 表。覆盖成功、失败、部分成功、无信号等场景，以及 LLM 调用失败时的静默降级。",
+      "acceptance_criteria": [
+        "afterTask hook 接收 task context 和 signals 后，返回 reflection_id 和 outcome",
+        "user_feedback 为 '谢谢' 且无负面信号时，outcome 解析为 'success'",
+        "was_respawned=true 且无正面信号时，outcome 解析为 'failure'",
+        "timed_out=true 且 review_result='PASS' 时，outcome 解析为 'partial'（混合信号）",
+        "所有信号均为 null/false 时，outcome 解析为 'partial'（无信号 = 歧义）",
+        "user_feedback 为 '不对' 且 review_result='FAIL' 时，outcome 解析为 'failure'（多重负面信号叠加）",
+        "反思生成后，通过 reflection id 可从 SQLite 查询到完整反思条目（含 task_type, task_summary, outcome, reflection, lessons）",
+        "afterTask hook 为非阻塞执行：hook 返回后主流程不等待反思写入完成",
+        "LLM 反思调用失败时，hook 返回 reflection_id=null 且 outcome=null，不抛出异常",
+        "LLM 反思调用失败时，错误被记录到日志"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "成功任务触发反思生成并持久化",
+          "given": [
+            "存储层已初始化",
+            "LLM proxy 可用"
+          ],
+          "when": "afterTask hook 被调用，signals 包含 user_feedback='thanks' 且 review_result='PASS'",
+          "then": [
+            "hook 返回非空 reflection_id",
+            "hook 返回 outcome='success'",
+            "数据库中存在对应 reflection_id 的反思条目"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "失败任务触发反思生成",
+          "given": [
+            "存储层已初始化",
+            "LLM proxy 可用"
+          ],
+          "when": "afterTask hook 被调用，signals 包含 was_respawned=true 且 timed_out=true",
+          "then": [
+            "hook 返回 outcome='failure'",
+            "数据库中反思条目的 outcome 字段为 'failure'"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "LLM 调用失败时静默降级",
+          "given": [
+            "存储层已初始化",
+            "LLM proxy 返回错误"
+          ],
+          "when": "afterTask hook 被调用，signals 包含有效信号",
+          "then": [
+            "hook 返回 reflection_id=null",
+            "hook 不抛出异常",
+            "数据库中无新增反思条目"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "混合信号解析为 partial",
+          "given": [
+            "存储层已初始化",
+            "LLM proxy 可用"
+          ],
+          "when": "afterTask hook 被调用，signals 包含 timed_out=true 且 user_feedback='thanks'",
+          "then": [
+            "hook 返回 outcome='partial'"
+          ]
+        }
+      ],
+      "scope": [
+        "afterTask hook 端到端流程验证",
+        "信号解析算法的全分支覆盖",
+        "LLM 反思生成集成验证",
+        "静默降级行为验证"
+      ],
+      "out_of_scope": [
+        "信号解析算法的内部实现",
+        "LLM prompt 模板的具体内容",
+        "反思条目的检索和注入"
+      ],
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "verify",
+      "fr_refs": [
+        "FR-6",
+        "FR-7"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]"
+      ],
+      "depends": [
+        "TASK-BE-2.3",
+        "TASK-BE-2.1",
+        "TASK-BE-2.2"
+      ]
+    },
+    {
+      "id": "TASK-BE-2.5",
+      "title": "验证 beforeSpawn hook 注入相关反思到任务描述",
+      "description": "端到端验证 beforeSpawn hook 被调用后，通过 BM25 搜索检索与新任务相关的历史反思，并将其注入到任务描述中。覆盖有匹配反思、无匹配反思、首次任务类型等场景。",
+      "acceptance_criteria": [
+        "beforeSpawn hook 接收 task_description 和 task_type 后，返回 augmented_task_description 和 injected_reflections 数组",
+        "数据库中存在与 task_type 匹配的反思时，augmented_task_description 包含原始描述和注入的反思内容",
+        "injected_reflections 数组中每个条目包含 reflection 文本和 lessons 数组",
+        "注入的反思数量不超过配置的 reflection_injection_limit（默认 5）",
+        "数据库中无匹配反思时，augmented_task_description 等于原始 task_description，injected_reflections 为空数组",
+        "beforeSpawn hook 为同步执行：返回时反思注入已完成",
+        "反思检索延迟 < 100ms（≤ 1000 条反思数据量下）"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "有匹配反思时注入到任务描述",
+          "given": [
+            "数据库中存在 task_type='code' 的反思条目，包含 lessons"
+          ],
+          "when": "beforeSpawn hook 被调用，task_type='code'，task_description='实现用户登录'",
+          "then": [
+            "返回的 augmented_task_description 包含原始描述 '实现用户登录'",
+            "返回的 augmented_task_description 包含反思中的 lessons 内容",
+            "injected_reflections 数组非空"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "无匹配反思时原样返回",
+          "given": [
+            "数据库中无任何反思条目"
+          ],
+          "when": "beforeSpawn hook 被调用，task_type='deployment'，task_description='部署到生产'",
+          "then": [
+            "返回的 augmented_task_description 等于 '部署到生产'",
+            "injected_reflections 为空数组"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "反思注入数量受限于配置上限",
+          "given": [
+            "数据库中存在 10 条 task_type='code' 的匹配反思",
+            "reflection_injection_limit 配置为 5"
+          ],
+          "when": "beforeSpawn hook 被调用，task_type='code'",
+          "then": [
+            "injected_reflections 数组长度 ≤ 5"
+          ]
+        }
+      ],
+      "scope": [
+        "beforeSpawn hook 端到端流程验证",
+        "BM25 反思检索集成验证",
+        "反思注入格式和数量限制验证",
+        "无匹配场景的空操作验证"
+      ],
+      "out_of_scope": [
+        "BM25 搜索引擎的内部实现",
+        "反思条目的生成（由 afterTask 流程负责）",
+        "反思注入后下游 agent 的行为变化"
+      ],
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "verify",
+      "fr_refs": [
+        "FR-6",
+        "FR-7"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]"
+      ],
+      "depends": [
+        "TASK-BE-2.4",
+        "TASK-BE-2.1",
+        "TASK-BE-2.2",
+        "TASK-BE-2.3"
+      ]
+    },
+    {
+      "id": "TASK-BE-2.6",
+      "title": "验证反思生成到反思注入的端到端闭环",
+      "description": "端到端验证完整的自学习闭环：一个任务完成后通过 afterTask 生成反思，随后新任务 spawn 时通过 beforeSpawn 检索并注入该反思。验证数据流从信号解析→反思生成→存储→检索→注入的完整路径。",
+      "acceptance_criteria": [
+        "任务 A 完成后 afterTask 生成的反思，在任务 B spawn 时通过 beforeSpawn 被检索并注入",
+        "注入的反思内容与原始生成的反思内容一致（包含 reflection 文本和 lessons）",
+        "不同 task_type 的反思不会被错误注入到不相关类型的任务中",
+        "多次任务完成生成的多条反思，按 BM25 相关性排序注入"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "e2e",
+          "name": "反思生成后在后续任务中被注入",
+          "given": [
+            "存储层已初始化",
+            "LLM proxy 可用",
+            "无历史反思数据"
+          ],
+          "when": "先调用 afterTask hook（task_type='code', user_feedback='wrong'）生成反思，再调用 beforeSpawn hook（task_type='code'）",
+          "then": [
+            "beforeSpawn 返回的 injected_reflections 包含 afterTask 生成的反思",
+            "augmented_task_description 包含该反思的 lessons 内容"
+          ]
+        },
+        {
+          "type": "e2e",
+          "name": "不同类型任务的反思隔离",
+          "given": [
+            "存储层已初始化",
+            "已有 task_type='research' 的反思条目"
+          ],
+          "when": "调用 beforeSpawn hook，task_type='deployment'",
+          "then": [
+            "injected_reflections 不包含 task_type='research' 的反思（或相关性极低排在注入限制之外）"
+          ]
+        }
+      ],
+      "scope": [
+        "afterTask → 存储 → beforeSpawn 的完整数据流验证",
+        "跨 hook 的反思数据一致性验证",
+        "task_type 维度的反思相关性验证"
+      ],
+      "out_of_scope": [
+        "反思注入对 agent 行为改善的效果评估",
+        "并发任务完成场景",
+        "与 Phase 1 memory 系统的交互"
+      ],
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "verify",
+      "fr_refs": [
+        "FR-6",
+        "FR-7"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]"
+      ],
+      "depends": [
+        "TASK-BE-2.5",
+        "TASK-BE-2.1",
+        "TASK-BE-2.2",
+        "TASK-BE-2.3"
+      ]
+    }
+  ]
+}

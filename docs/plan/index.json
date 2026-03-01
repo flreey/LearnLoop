@@ -1,0 +1,316 @@
+{
+  "phases": [
+    {
+      "id": 0,
+      "name": "Project Initialization & Storage Infrastructure",
+      "type": "backend",
+      "depends": [],
+      "description": "Initialize project skeleton, configure TypeScript/Node.js build toolchain, install dependencies (better-sqlite3, minisearch), and implement SQLite storage engine with schema for memories, reflections, and session state. DB auto-creates on first write.",
+      "design_focus": [
+        "design/backend.json#conventions",
+        "design/backend.json#tech_stack",
+        "design/backend.json#entities",
+        "design/backend.json#constraints"
+      ],
+      "rough_tasks": [
+        {
+          "story_id": "STORY-PLATFORM-BOOT",
+          "role": "implement",
+          "title": "Initialize project skeleton, TypeScript config, and install all dependencies",
+          "fr_refs": [
+            "FR-1"
+          ],
+          "capability_refs": [
+            "CAP-BE-CONST-DB-AUTO-CREATE",
+            "CAP-BE-CONST-DATA-LOCALITY"
+          ]
+        },
+        {
+          "story_id": "STORY-STORAGE-ENGINE",
+          "role": "implement",
+          "title": "Implement SQLite storage layer with memory/reflection/session_state schemas and CRUD operations",
+          "fr_refs": [
+            "FR-1"
+          ],
+          "capability_refs": [
+            "CAP-BE-DATA-MEMORY",
+            "CAP-BE-DATA-REFLECTION",
+            "CAP-BE-DATA-SESSION-STATE",
+            "CAP-BE-CONST-DB-AUTO-CREATE",
+            "CAP-BE-CONST-DATA-LOCALITY",
+            "CAP-BE-CONST-STORAGE-FOOTPRINT"
+          ]
+        },
+        {
+          "story_id": "STORY-STORAGE-ENGINE",
+          "role": "integrate",
+          "title": "Integrate BM25 search engine (minisearch) with storage layer for text indexing",
+          "fr_refs": [
+            "FR-1"
+          ],
+          "capability_refs": [
+            "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+            "CAP-BE-CONST-RETRIEVAL-LATENCY"
+          ]
+        },
+        {
+          "story_id": "STORY-STORAGE-ENGINE",
+          "role": "verify",
+          "title": "Verify storage CRUD, DB auto-creation, BM25 search correctness, and retrieval latency < 100ms",
+          "fr_refs": [
+            "FR-1"
+          ],
+          "capability_refs": [
+            "CAP-BE-DATA-MEMORY",
+            "CAP-BE-DATA-REFLECTION",
+            "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+            "CAP-BE-CONST-RETRIEVAL-LATENCY"
+          ]
+        }
+      ],
+      "file": "phases/phase-0.json",
+      "completed_count": 5,
+      "task_count": 5,
+      "status": "completed"
+    },
+    {
+      "id": 1,
+      "name": "Intelligent Memory — Extraction, Conflict Detection, Retrieval & Injection",
+      "type": "backend",
+      "depends": [
+        0
+      ],
+      "description": "Implement Layer 2: lazy memory extraction via LLM (GPT-4o-mini), memory conflict detection and upsert logic, tri-dimensional retrieval algorithm (recency + BM25 relevance + importance), and memory context injection into conversation via beforeTurn hook.",
+      "design_focus": [
+        "design/backend.json#endpoints",
+        "design/backend.json#algorithms",
+        "design/backend.json#integrations",
+        "design/backend.json#business_rules",
+        "design/backend.json#seed_data"
+      ],
+      "rough_tasks": [
+        {
+          "story_id": "STORY-MEMORY-EXTRACTION",
+          "role": "implement",
+          "title": "Implement lazy memory extraction with LLM call, conflict detection upsert, and lazy-extraction-check algorithm",
+          "fr_refs": [
+            "FR-2",
+            "FR-3"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-INTERNAL-EXTRACT-MEMORIES",
+            "CAP-BE-INTG-LLM-MEMORY-EXTRACTION",
+            "CAP-BE-ALGO-LAZY-EXTRACTION-CHECK",
+            "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+            "CAP-BE-RULE-MEMORY-CONFLICT-UPSERT",
+            "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+            "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+            "CAP-BE-CONST-SILENT-DEGRADATION",
+            "CAP-BE-CONST-LLM-COST-TARGET"
+          ]
+        },
+        {
+          "story_id": "STORY-MEMORY-RETRIEVAL",
+          "role": "implement",
+          "title": "Implement tri-dimensional retrieval algorithm and memory/reflection injection into context",
+          "fr_refs": [
+            "FR-4",
+            "FR-5"
+          ],
+          "capability_refs": [
+            "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+            "CAP-BE-API-INTERNAL-RETRIEVE-MEMORIES",
+            "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+            "CAP-BE-RULE-ACCESS-TRACKING",
+            "CAP-BE-SEED-RETRIEVAL-CONFIG",
+            "CAP-BE-CONST-RETRIEVAL-LATENCY",
+            "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+          ]
+        },
+        {
+          "story_id": "STORY-MEMORY-RETRIEVAL",
+          "role": "integrate",
+          "title": "Wire beforeTurn hook to orchestrate lazy extraction check then memory injection",
+          "fr_refs": [
+            "FR-2",
+            "FR-5"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-HOOK-BEFORE-TURN",
+            "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+            "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+            "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+          ]
+        },
+        {
+          "story_id": "STORY-MEMORY-RETRIEVAL",
+          "role": "verify",
+          "title": "Verify extraction-to-injection pipeline: lazy extraction triggers, conflict upsert, retrieval scoring, and context injection",
+          "fr_refs": [
+            "FR-2",
+            "FR-3",
+            "FR-4",
+            "FR-5"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-HOOK-BEFORE-TURN",
+            "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+            "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+            "CAP-BE-CONST-SILENT-DEGRADATION"
+          ]
+        }
+      ],
+      "file": "phases/phase-1.json",
+      "completed_count": 4,
+      "task_count": 4,
+      "status": "completed"
+    },
+    {
+      "id": 2,
+      "name": "Self-Learning — Reflection Generation & Injection",
+      "type": "backend",
+      "depends": [
+        0
+      ],
+      "description": "Implement Layer 3: post-task reflection generation via LLM with signal-outcome resolution, reflection storage, BM25-based reflection retrieval, and reflection injection into subtask descriptions via beforeSpawn hook.",
+      "design_focus": [
+        "design/backend.json#endpoints",
+        "design/backend.json#algorithms",
+        "design/backend.json#integrations",
+        "design/backend.json#business_rules",
+        "design/backend.json#seed_data"
+      ],
+      "rough_tasks": [
+        {
+          "story_id": "STORY-REFLECTION-GENERATION",
+          "role": "implement",
+          "title": "Implement signal-outcome resolution, LLM reflection generation, and afterTask hook wiring",
+          "fr_refs": [
+            "FR-6"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-HOOK-AFTER-TASK",
+            "CAP-BE-API-INTERNAL-GENERATE-REFLECTION",
+            "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+            "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+            "CAP-BE-RULE-REFLECTION-GENERATION-ON-TASK-COMPLETE",
+            "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+            "CAP-BE-CONST-SILENT-DEGRADATION",
+            "CAP-BE-SEED-OUTCOME-TYPES",
+            "CAP-BE-SEED-SIGNAL-PATTERNS"
+          ]
+        },
+        {
+          "story_id": "STORY-REFLECTION-INJECTION",
+          "role": "implement",
+          "title": "Implement reflection retrieval via BM25 and beforeSpawn hook injection into task descriptions",
+          "fr_refs": [
+            "FR-7"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-HOOK-BEFORE-SPAWN",
+            "CAP-BE-API-INTERNAL-RETRIEVE-REFLECTIONS",
+            "CAP-BE-RULE-REFLECTION-INJECTION-ON-SPAWN",
+            "CAP-BE-CONST-RETRIEVAL-LATENCY"
+          ]
+        },
+        {
+          "story_id": "STORY-REFLECTION-INJECTION",
+          "role": "verify",
+          "title": "Verify reflection generation on task complete, signal resolution, and reflection injection into spawned tasks",
+          "fr_refs": [
+            "FR-6",
+            "FR-7"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-HOOK-AFTER-TASK",
+            "CAP-BE-API-HOOK-BEFORE-SPAWN",
+            "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+            "CAP-BE-CONST-SILENT-DEGRADATION"
+          ]
+        }
+      ],
+      "file": "phases/phase-2.json",
+      "completed_count": 0,
+      "task_count": 6,
+      "status": "in_progress"
+    },
+    {
+      "id": 3,
+      "name": "End-to-End Integration & System Verification",
+      "type": "backend",
+      "depends": [
+        1,
+        2
+      ],
+      "description": "Validate the complete LearnLoop pipeline end-to-end: beforeTurn triggers lazy extraction + memory injection, afterTask triggers reflection generation, beforeSpawn triggers reflection injection. Verify silent degradation on LLM failures, performance constraints, and OpenClaw plugin registration.",
+      "design_focus": [
+        "design/backend.json#endpoints",
+        "design/backend.json#constraints",
+        "design/backend.json#business_rules"
+      ],
+      "rough_tasks": [
+        {
+          "story_id": "STORY-E2E-PIPELINE",
+          "role": "integrate",
+          "title": "Wire all 3 hooks into OpenClaw plugin entry point with unified configuration and error handling",
+          "fr_refs": [
+            "FR-1",
+            "FR-2",
+            "FR-5",
+            "FR-6",
+            "FR-7"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-HOOK-BEFORE-TURN",
+            "CAP-BE-API-HOOK-AFTER-TASK",
+            "CAP-BE-API-HOOK-BEFORE-SPAWN",
+            "CAP-BE-CONST-SILENT-DEGRADATION"
+          ]
+        },
+        {
+          "story_id": "STORY-E2E-PIPELINE",
+          "role": "verify",
+          "title": "End-to-end smoke test: full conversation lifecycle with memory extraction, retrieval, reflection, and injection",
+          "fr_refs": [
+            "FR-1",
+            "FR-2",
+            "FR-3",
+            "FR-4",
+            "FR-5",
+            "FR-6",
+            "FR-7"
+          ],
+          "capability_refs": [
+            "CAP-BE-API-HOOK-BEFORE-TURN",
+            "CAP-BE-API-HOOK-AFTER-TASK",
+            "CAP-BE-API-HOOK-BEFORE-SPAWN",
+            "CAP-BE-CONST-RETRIEVAL-LATENCY",
+            "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+            "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+            "CAP-BE-CONST-SILENT-DEGRADATION",
+            "CAP-BE-CONST-LLM-COST-TARGET"
+          ]
+        }
+      ],
+      "file": "phases/phase-3.json"
+    }
+  ],
+  "directory_structure": {
+    "src/": "Source root for all TypeScript modules",
+    "src/storage/": "SQLite storage engine, schema definitions, migration logic",
+    "src/search/": "BM25 search engine wrapper (minisearch integration)",
+    "src/memory/": "Memory extraction, conflict detection, retrieval, and injection",
+    "src/reflection/": "Reflection generation, signal resolution, retrieval, and injection",
+    "src/hooks/": "OpenClaw plugin hook handlers (beforeTurn, afterTask, beforeSpawn)",
+    "src/llm/": "LLM client wrapper for GPT-4o-mini calls via OpenClaw proxy",
+    "src/config/": "Configuration management (retrieval weights, LLM config, paths)",
+    "src/types/": "Shared TypeScript type definitions (Memory, Reflection, SessionState)",
+    "test/": "Tests mirroring src/ structure (unit + integration)",
+    "test/fixtures/": "Test fixtures (sample conversations, mock LLM responses)"
+  },
+  "current_focus": {
+    "phase_id": 2,
+    "task_id": "TASK-BE-2.1"
+  }
+}

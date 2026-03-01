@@ -1,0 +1,451 @@
+{
+  "id": 0,
+  "name": "Project Initialization & Storage Infrastructure",
+  "type": "backend",
+  "tasks": [
+    {
+      "id": "TASK-BE-0.1",
+      "title": "Initialize project skeleton with TypeScript toolchain and dependencies",
+      "description": "Create the LearnLoop project structure with TypeScript/Node.js build configuration, install core dependencies (better-sqlite3, minisearch), set up test runner, and establish the module directory layout. The project must build and pass an empty test suite upon completion.",
+      "acceptance_criteria": [
+        "Running the build command produces valid JavaScript output with no errors",
+        "TypeScript strict mode is enabled in tsconfig.json",
+        "better-sqlite3 is listed as a production dependency and can be imported without error",
+        "minisearch is listed as a production dependency and can be imported without error",
+        "A test runner (vitest or jest) is configured and executing the test command exits with code 0",
+        "Source directories exist: src/storage/, src/search/, src/memory/, src/reflection/, src/hooks/, src/llm/, src/config/, src/types/",
+        "Test directory exists: test/fixtures/",
+        "The database directory path defaults to ~/.openclaw/learnloop/ when resolved from configuration"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "Project builds and tests pass on clean checkout",
+          "given": [
+            "A fresh clone of the repository with dependencies installed"
+          ],
+          "when": "The build command is executed followed by the test command",
+          "then": [
+            "Both commands exit with code 0",
+            "No TypeScript compilation errors are emitted"
+          ]
+        }
+      ],
+      "scope": [
+        "Project scaffolding",
+        "TypeScript configuration",
+        "Dependency installation",
+        "Directory structure",
+        "Test runner setup"
+      ],
+      "out_of_scope": [
+        "Database schema creation",
+        "Any business logic",
+        "CI/CD pipeline"
+      ],
+      "story_id": "STORY-PLATFORM-BOOT",
+      "task_role": "implement",
+      "fr_refs": [
+        "FR-1"
+      ],
+      "capability_refs": [
+        "CAP-BE-CONST-DB-AUTO-CREATE",
+        "CAP-BE-CONST-DATA-LOCALITY"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#constraints[id=data-locality]",
+        "docs/design/backend.json#constraints[id=db-auto-create]"
+      ],
+      "depends": [],
+      "status": "completed",
+      "completed_at": "2026-03-01T11:48:37.995Z"
+    },
+    {
+      "id": "TASK-BE-0.2",
+      "title": "Implement SQLite storage layer with schema initialization and CRUD for memories, reflections, and session states",
+      "description": "Implement the SQLite storage engine that auto-creates the database file and directory on first access, initializes all three tables (memories, reflections, session_states) with correct schemas and indexes, and provides CRUD operations for each entity. All data is stored locally at ~/.openclaw/learnloop/learnloop.db using raw SQL via better-sqlite3.",
+      "acceptance_criteria": [
+        "When the database file does not exist, calling the storage initialization creates ~/.openclaw/learnloop/learnloop.db automatically",
+        "When the directory ~/.openclaw/learnloop/ does not exist, it is created recursively before database creation",
+        "The memories table contains columns: id (TEXT PK), type (TEXT NOT NULL), content (TEXT NOT NULL), subject (TEXT NOT NULL), confidence (REAL NOT NULL default 0.5), importance (REAL NOT NULL default 0.5), source_session (TEXT NOT NULL), access_count (INTEGER NOT NULL default 0), last_accessed_at (TEXT), created_at (TEXT NOT NULL), updated_at (TEXT NOT NULL)",
+        "The reflections table contains columns: id (TEXT PK), task_type (TEXT NOT NULL), task_summary (TEXT NOT NULL), outcome (TEXT NOT NULL), signals (TEXT NOT NULL), reflection (TEXT NOT NULL), lessons (TEXT NOT NULL), agent_id (TEXT), source_session (TEXT), created_at (TEXT NOT NULL)",
+        "The session_states table contains columns: session_key (TEXT PK), extracted (INTEGER NOT NULL default 0), conversation_hash (TEXT), created_at (TEXT NOT NULL), updated_at (TEXT NOT NULL)",
+        "Inserting a memory record and reading it back returns all fields with identical values",
+        "Updating an existing memory's content and confidence changes those fields and updates updated_at, while preserving other fields",
+        "Inserting a reflection record and reading it back returns all fields with identical values, with signals and lessons stored as JSON strings",
+        "Inserting a session_state record, updating its extracted flag to 1, and reading it back reflects the updated value",
+        "Querying memories by subject returns only records matching that subject",
+        "Querying memories by type returns only records matching that type",
+        "Deleting a memory by id removes it and subsequent read returns null/undefined"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "Database auto-creates on first write",
+          "given": [
+            "No database file exists at the configured path"
+          ],
+          "when": "A memory record is inserted via the storage layer",
+          "then": [
+            "The database file exists at the configured path",
+            "The inserted record can be read back successfully"
+          ]
+        },
+        {
+          "type": "unit",
+          "name": "Memory CRUD round-trip",
+          "given": [
+            "An initialized database with an empty memories table"
+          ],
+          "when": "A memory is inserted, read, updated, and deleted in sequence",
+          "then": [
+            "Each operation returns the expected result",
+            "After deletion the memory is no longer retrievable"
+          ]
+        },
+        {
+          "type": "unit",
+          "name": "Reflection insert and retrieval",
+          "given": [
+            "An initialized database with an empty reflections table"
+          ],
+          "when": "A reflection with signals=['user_feedback:positive'] and lessons=['check dependencies'] is inserted",
+          "then": [
+            "Reading it back returns signals and lessons as parseable JSON arrays with the original values"
+          ]
+        }
+      ],
+      "scope": [
+        "Database initialization and auto-creation",
+        "Schema DDL for all three tables",
+        "Indexes on memories and reflections",
+        "CRUD operations for memories, reflections, and session_states",
+        "Data locality enforcement (path under ~/.openclaw/learnloop/)"
+      ],
+      "out_of_scope": [
+        "BM25 search indexing",
+        "Tri-dimensional scoring",
+        "Conflict detection logic",
+        "Migration versioning"
+      ],
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "implement",
+      "fr_refs": [
+        "FR-1"
+      ],
+      "capability_refs": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-DATA-SESSION-STATE",
+        "CAP-BE-CONST-DB-AUTO-CREATE",
+        "CAP-BE-CONST-DATA-LOCALITY",
+        "CAP-BE-CONST-STORAGE-FOOTPRINT"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#constraints[id=data-locality]",
+        "docs/design/backend.json#constraints[id=db-auto-create]",
+        "docs/design/backend.json#constraints[id=storage-footprint]",
+        "docs/design/backend.json#entities[id=memory]",
+        "docs/design/backend.json#entities[id=reflection]",
+        "docs/design/backend.json#entities[id=session_state]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "depends": [],
+      "status": "completed",
+      "completed_at": "2026-03-01T11:52:19.728Z"
+    },
+    {
+      "id": "TASK-BE-0.3",
+      "title": "Integrate MiniSearch BM25 engine with storage layer for text search on memories and reflections",
+      "description": "Integrate minisearch as the BM25 text search engine, indexing memory content/subject and reflection task_summary/reflection fields. The search index must be built from existing database records on initialization and kept in sync when records are added or updated. Search must support CJK text and return results within the latency constraint.",
+      "acceptance_criteria": [
+        "After initializing the search engine with 100 memory records, searching by a keyword present in one record's content returns that record's id in the results",
+        "After adding a new memory record via the storage layer, searching for a unique term in that record's content returns it without requiring a full re-index",
+        "After updating a memory record's content, searching for the old unique term no longer returns that record, and searching for the new term does",
+        "After deleting a memory record, searching for its unique content term no longer returns that record",
+        "Searching for a Chinese term (e.g., '偏好') that exists in a memory's content returns that memory in results",
+        "Searching reflections by a keyword in task_summary returns matching reflection ids",
+        "Search returns results scored by BM25 relevance (highest relevance first)",
+        "Searching across 1000 indexed memory records completes in under 100ms",
+        "Searching with a query that matches no records returns an empty result set",
+        "The search index is rebuilt from database contents when the storage module initializes"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "BM25 search returns relevant memories",
+          "given": [
+            "10 memory records exist with varied content including one containing '用户偏好中文沟通'"
+          ],
+          "when": "A search is performed with query '中文沟通'",
+          "then": [
+            "The result set includes the memory containing '用户偏好中文沟通'",
+            "The result set is non-empty and ordered by relevance"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "Search latency within budget for 1000 records",
+          "given": [
+            "1000 memory records are indexed"
+          ],
+          "when": "A search query is executed",
+          "then": [
+            "The search completes and returns results in under 100ms"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "Index stays in sync after record mutation",
+          "given": [
+            "A memory with content 'deploy script fix' is indexed"
+          ],
+          "when": "The memory content is updated to 'CI pipeline optimization' and a search for 'deploy script' is performed",
+          "then": [
+            "The search for 'deploy script' returns an empty result",
+            "A search for 'pipeline optimization' returns the updated memory"
+          ]
+        }
+      ],
+      "scope": [
+        "MiniSearch configuration and initialization",
+        "Indexing memories (content, subject fields)",
+        "Indexing reflections (task_summary, reflection fields)",
+        "Index sync on add/update/delete",
+        "CJK tokenization support",
+        "Latency constraint verification"
+      ],
+      "out_of_scope": [
+        "Tri-dimensional scoring algorithm",
+        "Vector/embedding-based retrieval",
+        "Reflection injection logic",
+        "Memory injection logic"
+      ],
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "integrate",
+      "fr_refs": [
+        "FR-1"
+      ],
+      "capability_refs": [
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#integrations[id=bm25-search-engine]"
+      ],
+      "depends": [
+        "TASK-BE-0.2"
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T12:05:30.822Z"
+    },
+    {
+      "id": "TASK-BE-0.4",
+      "title": "验证存储层 CRUD 操作与数据库自动创建",
+      "description": "验证 SQLite 存储层对 memories、reflections、session_states 三张表的完整 CRUD 操作正确性，以及数据库文件不存在时自动创建的行为。此任务为 verify 角色，假设存储层实现已由同 phase 的 sibling tasks 完成，本任务聚焦于黑盒行为验证。",
+      "acceptance_criteria": [
+        "向 memories 表插入一条完整记录后，按 id 查询返回的记录各字段值与插入时一致",
+        "向 memories 表插入记录后，通过 update 修改 content 和 confidence 字段，再次查询返回更新后的值",
+        "向 reflections 表插入一条完整记录后，按 id 查询返回的记录各字段值与插入时一致",
+        "向 reflections 表插入记录后，通过 update 修改 reflection 和 outcome 字段，再次查询返回更新后的值",
+        "向 session_states 表插入一条记录后，按 id 查询返回的记录各字段值与插入时一致",
+        "删除 memories 表中的一条记录后，按该 id 查询返回 null 或 undefined",
+        "删除 reflections 表中的一条记录后，按该 id 查询返回 null 或 undefined",
+        "当数据库文件路径不存在时，首次执行写入操作后数据库文件被自动创建且包含 memories、reflections、session_states 三张表",
+        "memories 表的 type 字段仅接受 preference、fact、entity、episode 四种值之一，插入其他值时操作失败或被拒绝",
+        "reflections 表的 outcome 字段仅接受 success、failure、partial 三种值之一，插入其他值时操作失败或被拒绝",
+        "memories 表中 confidence 和 importance 字段未指定时使用默认值 0.5，access_count 默认值为 0"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "数据库文件不存在时自动创建",
+          "given": [
+            "指定的数据库文件路径不存在"
+          ],
+          "when": "初始化存储层并执行一次写入操作",
+          "then": [
+            "数据库文件在指定路径被创建",
+            "查询 sqlite_master 返回 memories、reflections、session_states 三张表"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "Memory 完整生命周期",
+          "given": [
+            "数据库已初始化且 memories 表为空"
+          ],
+          "when": "依次执行插入、查询、更新、再查询、删除、再查询操作",
+          "then": [
+            "插入后查询返回完整记录",
+            "更新后查询返回修改后的值",
+            "删除后查询返回空结果"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "Reflection 完整生命周期",
+          "given": [
+            "数据库已初始化且 reflections 表为空"
+          ],
+          "when": "依次执行插入、查询、更新、再查询、删除、再查询操作",
+          "then": [
+            "插入后查询返回完整记录",
+            "更新后查询返回修改后的值",
+            "删除后查询返回空结果"
+          ]
+        }
+      ],
+      "scope": [
+        "memories 表 CRUD 验证",
+        "reflections 表 CRUD 验证",
+        "session_states 表 CRUD 验证",
+        "数据库自动创建验证",
+        "字段约束与默认值验证"
+      ],
+      "out_of_scope": [
+        "BM25 搜索验证",
+        "性能基准测试",
+        "存储层实现代码编写"
+      ],
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "verify",
+      "fr_refs": [
+        "FR-1"
+      ],
+      "capability_refs": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#entities[id=memory]",
+        "docs/design/backend.json#entities[id=reflection]",
+        "docs/design/backend.json#integrations[id=bm25-search-engine]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "depends": [
+        "TASK-BE-0.3",
+        "TASK-BE-0.1",
+        "TASK-BE-0.2"
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T12:09:12.502Z"
+    },
+    {
+      "id": "TASK-BE-0.5",
+      "title": "验证 BM25 搜索正确性与检索延迟约束",
+      "description": "验证基于 minisearch 的 BM25 文本搜索在 memories 和 reflections 数据上的搜索正确性，包括中英文内容的匹配、相关性排序，以及在 1000 条数据规模下检索延迟 < 100ms 的性能约束。",
+      "acceptance_criteria": [
+        "向 memories 表插入 5 条不同 content 的记录后，搜索其中一条的关键词返回该条记录在结果列表中",
+        "搜索一个不存在于任何记录中的关键词，返回空结果列表",
+        "向 memories 表插入包含中文 content 的记录后，使用中文关键词搜索能匹配到该记录",
+        "搜索结果按 BM25 相关性评分降序排列（评分最高的排在第一位）",
+        "向 reflections 表插入 5 条不同 task_summary 的记录后，按 task_summary 关键词搜索返回匹配的记录",
+        "在 memories 表中插入 1000 条记录后，单次搜索操作耗时 < 100ms",
+        "在 reflections 表中插入 1000 条记录后，单次搜索操作耗时 < 100ms",
+        "部分匹配场景：搜索词为记录 content 的子串时，能返回包含该子串的记录"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "Memory BM25 搜索命中",
+          "given": [
+            "memories 表中包含 5 条不同主题的记录，其中一条 content 包含「TypeScript 配置」"
+          ],
+          "when": "以「TypeScript」为关键词执行搜索",
+          "then": [
+            "返回结果列表非空",
+            "结果中包含 content 含「TypeScript 配置」的记录"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "中文内容搜索",
+          "given": [
+            "memories 表中包含一条 content 为「用户偏好中文沟通」的记录"
+          ],
+          "when": "以「中文」为关键词执行搜索",
+          "then": [
+            "返回结果列表非空",
+            "结果中包含该中文记录"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "Reflection BM25 搜索命中",
+          "given": [
+            "reflections 表中包含 5 条不同 task_summary 的记录，其中一条 task_summary 包含「Puppeteer」"
+          ],
+          "when": "以「Puppeteer」为关键词执行搜索",
+          "then": [
+            "返回结果列表非空",
+            "结果中包含 task_summary 含「Puppeteer」的记录"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "1000 条 memories 检索延迟",
+          "given": [
+            "memories 表中已插入 1000 条记录且搜索索引已构建"
+          ],
+          "when": "执行一次关键词搜索并计时",
+          "then": [
+            "搜索操作耗时 < 100ms"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "1000 条 reflections 检索延迟",
+          "given": [
+            "reflections 表中已插入 1000 条记录且搜索索引已构建"
+          ],
+          "when": "执行一次关键词搜索并计时",
+          "then": [
+            "搜索操作耗时 < 100ms"
+          ]
+        }
+      ],
+      "scope": [
+        "BM25 搜索命中与排序验证",
+        "中文内容搜索验证",
+        "1000 条数据规模性能基准",
+        "memories 和 reflections 两个数据集的搜索"
+      ],
+      "out_of_scope": [
+        "搜索引擎实现代码编写",
+        "向量检索",
+        "跨表联合搜索"
+      ],
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "verify",
+      "fr_refs": [
+        "FR-1"
+      ],
+      "capability_refs": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#entities[id=memory]",
+        "docs/design/backend.json#entities[id=reflection]",
+        "docs/design/backend.json#integrations[id=bm25-search-engine]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "depends": [
+        "TASK-BE-0.4",
+        "TASK-BE-0.1",
+        "TASK-BE-0.2",
+        "TASK-BE-0.3"
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T12:14:45.099Z"
+    }
+  ]
+}

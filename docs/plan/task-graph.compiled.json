@@ -1,0 +1,765 @@
+{
+  "version": 1,
+  "generated_at": "2026-03-01T10:53:42.265Z",
+  "tasks": [
+    {
+      "id": "TASK-BE-0.1",
+      "phase_id": 0,
+      "story_id": "STORY-PLATFORM-BOOT",
+      "task_role": "implement",
+      "capability_refs": [
+        "CAP-BE-CONST-DB-AUTO-CREATE",
+        "CAP-BE-CONST-DATA-LOCALITY"
+      ],
+      "depends": [],
+      "title": "Initialize project skeleton with TypeScript toolchain and dependencies",
+      "description": "Create the LearnLoop project structure with TypeScript/Node.js build configuration, install core dependencies (better-sqlite3, minisearch), set up test runner, and establish the module directory layout. The project must build and pass an empty test suite upon completion.",
+      "design_refs": [
+        "docs/design/backend.json#constraints[id=data-locality]",
+        "docs/design/backend.json#constraints[id=db-auto-create]"
+      ],
+      "scope": [
+        "Project scaffolding",
+        "TypeScript configuration",
+        "Dependency installation",
+        "Directory structure",
+        "Test runner setup"
+      ],
+      "out_of_scope": [
+        "Database schema creation",
+        "Any business logic",
+        "CI/CD pipeline"
+      ],
+      "fr_refs": [
+        "FR-1"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-0.2",
+      "phase_id": 0,
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "implement",
+      "capability_refs": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-DATA-SESSION-STATE",
+        "CAP-BE-CONST-DB-AUTO-CREATE",
+        "CAP-BE-CONST-DATA-LOCALITY",
+        "CAP-BE-CONST-STORAGE-FOOTPRINT"
+      ],
+      "depends": [],
+      "title": "Implement SQLite storage layer with schema initialization and CRUD for memories, reflections, and session states",
+      "description": "Implement the SQLite storage engine that auto-creates the database file and directory on first access, initializes all three tables (memories, reflections, session_states) with correct schemas and indexes, and provides CRUD operations for each entity. All data is stored locally at ~/.openclaw/learnloop/learnloop.db using raw SQL via better-sqlite3.",
+      "design_refs": [
+        "docs/design/backend.json#constraints[id=data-locality]",
+        "docs/design/backend.json#constraints[id=db-auto-create]",
+        "docs/design/backend.json#constraints[id=storage-footprint]",
+        "docs/design/backend.json#entities[id=memory]",
+        "docs/design/backend.json#entities[id=reflection]",
+        "docs/design/backend.json#entities[id=session_state]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "scope": [
+        "Database initialization and auto-creation",
+        "Schema DDL for all three tables",
+        "Indexes on memories and reflections",
+        "CRUD operations for memories, reflections, and session_states",
+        "Data locality enforcement (path under ~/.openclaw/learnloop/)"
+      ],
+      "out_of_scope": [
+        "BM25 search indexing",
+        "Tri-dimensional scoring",
+        "Conflict detection logic",
+        "Migration versioning"
+      ],
+      "fr_refs": [
+        "FR-1"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-0.3",
+      "phase_id": 0,
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "integrate",
+      "capability_refs": [
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "depends": [
+        "TASK-BE-0.2"
+      ],
+      "title": "Integrate MiniSearch BM25 engine with storage layer for text search on memories and reflections",
+      "description": "Integrate minisearch as the BM25 text search engine, indexing memory content/subject and reflection task_summary/reflection fields. The search index must be built from existing database records on initialization and kept in sync when records are added or updated. Search must support CJK text and return results within the latency constraint.",
+      "design_refs": [
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#integrations[id=bm25-search-engine]"
+      ],
+      "scope": [
+        "MiniSearch configuration and initialization",
+        "Indexing memories (content, subject fields)",
+        "Indexing reflections (task_summary, reflection fields)",
+        "Index sync on add/update/delete",
+        "CJK tokenization support",
+        "Latency constraint verification"
+      ],
+      "out_of_scope": [
+        "Tri-dimensional scoring algorithm",
+        "Vector/embedding-based retrieval",
+        "Reflection injection logic",
+        "Memory injection logic"
+      ],
+      "fr_refs": [
+        "FR-1"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-0.4",
+      "phase_id": 0,
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "verify",
+      "capability_refs": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "depends": [
+        "TASK-BE-0.3",
+        "TASK-BE-0.1",
+        "TASK-BE-0.2"
+      ],
+      "title": "验证存储层 CRUD 操作与数据库自动创建",
+      "description": "验证 SQLite 存储层对 memories、reflections、session_states 三张表的完整 CRUD 操作正确性，以及数据库文件不存在时自动创建的行为。此任务为 verify 角色，假设存储层实现已由同 phase 的 sibling tasks 完成，本任务聚焦于黑盒行为验证。",
+      "design_refs": [
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#entities[id=memory]",
+        "docs/design/backend.json#entities[id=reflection]",
+        "docs/design/backend.json#integrations[id=bm25-search-engine]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "scope": [
+        "memories 表 CRUD 验证",
+        "reflections 表 CRUD 验证",
+        "session_states 表 CRUD 验证",
+        "数据库自动创建验证",
+        "字段约束与默认值验证"
+      ],
+      "out_of_scope": [
+        "BM25 搜索验证",
+        "性能基准测试",
+        "存储层实现代码编写"
+      ],
+      "fr_refs": [
+        "FR-1"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-0.5",
+      "phase_id": 0,
+      "story_id": "STORY-STORAGE-ENGINE",
+      "task_role": "verify",
+      "capability_refs": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "depends": [
+        "TASK-BE-0.4",
+        "TASK-BE-0.1",
+        "TASK-BE-0.2",
+        "TASK-BE-0.3"
+      ],
+      "title": "验证 BM25 搜索正确性与检索延迟约束",
+      "description": "验证基于 minisearch 的 BM25 文本搜索在 memories 和 reflections 数据上的搜索正确性，包括中英文内容的匹配、相关性排序，以及在 1000 条数据规模下检索延迟 < 100ms 的性能约束。",
+      "design_refs": [
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#entities[id=memory]",
+        "docs/design/backend.json#entities[id=reflection]",
+        "docs/design/backend.json#integrations[id=bm25-search-engine]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "scope": [
+        "BM25 搜索命中与排序验证",
+        "中文内容搜索验证",
+        "1000 条数据规模性能基准",
+        "memories 和 reflections 两个数据集的搜索"
+      ],
+      "out_of_scope": [
+        "搜索引擎实现代码编写",
+        "向量检索",
+        "跨表联合搜索"
+      ],
+      "fr_refs": [
+        "FR-1"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-1.1",
+      "phase_id": 1,
+      "story_id": "STORY-MEMORY-EXTRACTION",
+      "task_role": "implement",
+      "capability_refs": [
+        "CAP-BE-API-INTERNAL-EXTRACT-MEMORIES",
+        "CAP-BE-INTG-LLM-MEMORY-EXTRACTION",
+        "CAP-BE-ALGO-LAZY-EXTRACTION-CHECK",
+        "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+        "CAP-BE-RULE-MEMORY-CONFLICT-UPSERT",
+        "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+        "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-CONST-LLM-COST-TARGET"
+      ],
+      "depends": [
+        "TASK-BE-0.5"
+      ],
+      "title": "实现 LLM 记忆提取与冲突检测 upsert 逻辑",
+      "description": "实现从对话历史中通过 LLM 提取记忆条目的核心逻辑，包括：构造提取 prompt 并调用 LLM、解析返回的记忆数组、对每条新记忆执行冲突检测（同 subject + 同 type 则 update，否则 insert）、以及懒提取资格检查算法。提取过程异步非阻塞，LLM 调用失败时静默降级返回空数组。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=lazy-extraction-check]",
+        "docs/design/backend.json#algorithms[id=memory-conflict-detection]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-conflict-upsert]",
+        "docs/design/backend.json#constraints[id=llm-cost-target]",
+        "docs/design/backend.json#constraints[id=non-blocking-extraction]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=internal-extract-memories]",
+        "docs/design/backend.json#integrations[id=llm-memory-extraction]"
+      ],
+      "scope": [
+        "extractMemories 内部函数实现",
+        "LLM 提取 prompt 构造与响应解析",
+        "冲突检测算法（同 subject + 同 type 判定）",
+        "冲突 upsert 逻辑（update vs insert）",
+        "lazy extraction eligibility check 算法",
+        "LLM 调用失败的静默降级处理"
+      ],
+      "out_of_scope": [
+        "beforeTurn hook 编排逻辑（由 sibling task 实现）",
+        "记忆检索与注入",
+        "反射生成",
+        "BM25 搜索引擎初始化（Phase 0 已实现）"
+      ],
+      "fr_refs": [
+        "FR-2",
+        "FR-3"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-1.2",
+      "phase_id": 1,
+      "story_id": "STORY-MEMORY-RETRIEVAL",
+      "task_role": "implement",
+      "capability_refs": [
+        "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+        "CAP-BE-API-INTERNAL-RETRIEVE-MEMORIES",
+        "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+        "CAP-BE-RULE-ACCESS-TRACKING",
+        "CAP-BE-SEED-RETRIEVAL-CONFIG",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY",
+        "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+      ],
+      "depends": [],
+      "title": "实现三维记忆检索算法与记忆上下文注入",
+      "description": "实现三维检索评分算法（recency 时间衰减 + BM25 relevance + importance 加权），将检索结果注入对话上下文。包括：BM25 搜索获取相关性分数、指数时间衰减计算、加权综合评分与排序、Top-N 截取、访问计数与时间戳追踪更新、以及将检索到的记忆格式化注入 system prompt 或 context。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=tri-dimensional-retrieval]",
+        "docs/design/backend.json#business_rules[id=access-tracking]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#constraints[id=synchronous-injection]",
+        "docs/design/backend.json#endpoints[id=internal-retrieve-memories]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "scope": [
+        "三维检索评分算法（recency + relevance + importance）",
+        "BM25 搜索结果归一化",
+        "指数时间衰减函数",
+        "加权评分与排序",
+        "Top-N 截取与 limit 参数",
+        "访问计数与 last_accessed_at 追踪更新",
+        "默认检索配置（权重、lambda、injection limit）",
+        "记忆注入格式化与上下文拼接",
+        "无相关记忆时跳过注入"
+      ],
+      "out_of_scope": [
+        "beforeTurn hook 编排逻辑（由 sibling task 实现）",
+        "记忆提取与冲突检测",
+        "反射检索与注入（beforeSpawn hook）",
+        "BM25 引擎初始化与索引构建（Phase 0 已实现）",
+        "Token 预算管理（PRD 标记为 open question Q3）"
+      ],
+      "fr_refs": [
+        "FR-4",
+        "FR-5"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-1.3",
+      "phase_id": 1,
+      "story_id": "STORY-MEMORY-RETRIEVAL",
+      "task_role": "integrate",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+        "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+        "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+      ],
+      "depends": [
+        "TASK-BE-1.2"
+      ],
+      "title": "Wire beforeTurn hook to orchestrate lazy extraction check and memory context injection",
+      "description": "实现 beforeTurn hook 处理函数，协调两个职责：1) 检查前一个 session 是否需要 lazy extraction 并异步触发；2) 同步执行 tri-dimensional retrieval 并将相关 memories 注入到当前对话上下文。此 task 是接线层，调用 sibling tasks 已实现的 extraction 和 retrieval 能力。",
+      "design_refs": [
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#constraints[id=synchronous-injection]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]"
+      ],
+      "scope": [
+        "beforeTurn hook 处理函数",
+        "lazy extraction 触发判断与异步调度",
+        "memory retrieval 调用与结果注入",
+        "静默降级错误处理"
+      ],
+      "out_of_scope": [
+        "lazy extraction 的具体实现（由 sibling task 0 提供）",
+        "tri-dimensional retrieval 算法的具体实现（由 sibling task 1 提供）",
+        "conflict detection 逻辑",
+        "afterTask / beforeSpawn hook"
+      ],
+      "fr_refs": [
+        "FR-2",
+        "FR-5"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-1.4",
+      "phase_id": 1,
+      "story_id": "STORY-MEMORY-RETRIEVAL",
+      "task_role": "verify",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+        "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "depends": [
+        "TASK-BE-1.3",
+        "TASK-BE-1.1",
+        "TASK-BE-1.2"
+      ],
+      "title": "验证 extraction-to-injection 端到端管道：从懒提取到冲突更新到检索注入",
+      "description": "端到端集成验证：当新 session 的 beforeTurn 触发时，系统完成完整管道——检查前一 session 是否未提取、异步调用 LLM 提取记忆、对同 subject+type 的已有记忆执行 upsert 而非重复插入、通过三维评分检索相关记忆、将 top-N 记忆注入到对话上下文中。验证管道各阶段的数据流转正确性和端到端行为。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=memory-conflict-detection]",
+        "docs/design/backend.json#algorithms[id=tri-dimensional-retrieval]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "scope": [
+        "beforeTurn hook 完整管道集成验证",
+        "懒提取触发条件检查",
+        "LLM 提取 → 冲突检测 → 存储的数据流",
+        "三维检索 → 注入的数据流",
+        "访问追踪副作用",
+        "LLM 失败时的静默降级"
+      ],
+      "out_of_scope": [
+        "reflection 相关流程（afterTask / beforeSpawn）",
+        "BM25 索引内部实现细节",
+        "LLM prompt 内容优化",
+        "token 预算截断逻辑"
+      ],
+      "fr_refs": [
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-2.1",
+      "phase_id": 2,
+      "story_id": "STORY-REFLECTION-GENERATION",
+      "task_role": "implement",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-INTERNAL-GENERATE-REFLECTION",
+        "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-RULE-REFLECTION-GENERATION-ON-TASK-COMPLETE",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-SEED-OUTCOME-TYPES",
+        "CAP-BE-SEED-SIGNAL-PATTERNS"
+      ],
+      "depends": [
+        "TASK-BE-0.5"
+      ],
+      "title": "Implement signal-outcome resolution and LLM reflection generation",
+      "description": "Implement the signal-outcome resolution algorithm that classifies task completion signals into success/failure/partial outcomes, and the LLM-based reflection generation function that produces structured reflection entries from task context. Includes silent degradation on LLM failure.",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#constraints[id=non-blocking-reflection]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=internal-generate-reflection]",
+        "docs/design/backend.json#integrations[id=llm-reflection-generation]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "scope": [
+        "signal-outcome 解析算法（含正向/负向关键词模式匹配）",
+        "LLM reflection 生成函数",
+        "LLM 调用失败的静默降级处理"
+      ],
+      "out_of_scope": [
+        "afterTask hook 接线",
+        "reflection 的 BM25 检索",
+        "beforeSpawn hook 注入"
+      ],
+      "fr_refs": [
+        "FR-6"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-2.2",
+      "phase_id": 2,
+      "story_id": "STORY-REFLECTION-GENERATION",
+      "task_role": "implement",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-INTERNAL-GENERATE-REFLECTION",
+        "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-RULE-REFLECTION-GENERATION-ON-TASK-COMPLETE",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-SEED-OUTCOME-TYPES",
+        "CAP-BE-SEED-SIGNAL-PATTERNS"
+      ],
+      "depends": [
+        "TASK-BE-2.1"
+      ],
+      "title": "Wire afterTask hook to orchestrate reflection generation and storage",
+      "description": "Implement the afterTask hook handler that receives task completion context, invokes signal-outcome resolution and LLM reflection generation, and persists the resulting reflection entry to SQLite. The hook must be non-blocking — task completion proceeds regardless of reflection generation result.",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#constraints[id=non-blocking-reflection]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=internal-generate-reflection]",
+        "docs/design/backend.json#integrations[id=llm-reflection-generation]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "scope": [
+        "afterTask hook handler 实现",
+        "hook 到 signal-outcome 解析和 reflection 生成的编排",
+        "reflection 持久化到 SQLite"
+      ],
+      "out_of_scope": [
+        "signal-outcome 解析算法本身（前置 task 已实现）",
+        "LLM reflection 生成函数本身（前置 task 已实现）",
+        "beforeSpawn hook"
+      ],
+      "fr_refs": [
+        "FR-6"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-2.3",
+      "phase_id": 2,
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "implement",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-API-INTERNAL-RETRIEVE-REFLECTIONS",
+        "CAP-BE-RULE-REFLECTION-INJECTION-ON-SPAWN",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ],
+      "depends": [],
+      "title": "Implement reflection BM25 retrieval and beforeSpawn hook injection",
+      "description": "Implement BM25-based reflection retrieval that searches reflections by task_type and task_summary, and the beforeSpawn hook handler that retrieves relevant reflections and appends them to the task description before subtask dispatch. The hook is synchronous — spawn must wait for injection to complete.",
+      "design_refs": [
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]",
+        "docs/design/backend.json#endpoints[id=internal-retrieve-reflections]"
+      ],
+      "scope": [
+        "reflection BM25 检索函数",
+        "beforeSpawn hook handler 实现",
+        "reflection 文本注入到 task_description 的格式化逻辑"
+      ],
+      "out_of_scope": [
+        "BM25 搜索引擎初始化（Phase 0 已实现）",
+        "reflection 生成逻辑（同 phase 前置 task 已实现）",
+        "向量/cosine 相似度检索（Phase 2 后续升级）"
+      ],
+      "fr_refs": [
+        "FR-7"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-2.4",
+      "phase_id": 2,
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "verify",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "depends": [
+        "TASK-BE-2.3",
+        "TASK-BE-2.1",
+        "TASK-BE-2.2"
+      ],
+      "title": "验证 afterTask hook 触发反思生成完整流程：信号解析、LLM 调用、存储写入",
+      "description": "端到端验证 afterTask hook 被调用后，信号被正确解析为 outcome，LLM 生成反思条目，反思被写入 SQLite reflections 表。覆盖成功、失败、部分成功、无信号等场景，以及 LLM 调用失败时的静默降级。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]"
+      ],
+      "scope": [
+        "afterTask hook 端到端流程验证",
+        "信号解析算法的全分支覆盖",
+        "LLM 反思生成集成验证",
+        "静默降级行为验证"
+      ],
+      "out_of_scope": [
+        "信号解析算法的内部实现",
+        "LLM prompt 模板的具体内容",
+        "反思条目的检索和注入"
+      ],
+      "fr_refs": [
+        "FR-6",
+        "FR-7"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-2.5",
+      "phase_id": 2,
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "verify",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "depends": [
+        "TASK-BE-2.4",
+        "TASK-BE-2.1",
+        "TASK-BE-2.2",
+        "TASK-BE-2.3"
+      ],
+      "title": "验证 beforeSpawn hook 注入相关反思到任务描述",
+      "description": "端到端验证 beforeSpawn hook 被调用后，通过 BM25 搜索检索与新任务相关的历史反思，并将其注入到任务描述中。覆盖有匹配反思、无匹配反思、首次任务类型等场景。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]"
+      ],
+      "scope": [
+        "beforeSpawn hook 端到端流程验证",
+        "BM25 反思检索集成验证",
+        "反思注入格式和数量限制验证",
+        "无匹配场景的空操作验证"
+      ],
+      "out_of_scope": [
+        "BM25 搜索引擎的内部实现",
+        "反思条目的生成（由 afterTask 流程负责）",
+        "反思注入后下游 agent 的行为变化"
+      ],
+      "fr_refs": [
+        "FR-6",
+        "FR-7"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-2.6",
+      "phase_id": 2,
+      "story_id": "STORY-REFLECTION-INJECTION",
+      "task_role": "verify",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "depends": [
+        "TASK-BE-2.5",
+        "TASK-BE-2.1",
+        "TASK-BE-2.2",
+        "TASK-BE-2.3"
+      ],
+      "title": "验证反思生成到反思注入的端到端闭环",
+      "description": "端到端验证完整的自学习闭环：一个任务完成后通过 afterTask 生成反思，随后新任务 spawn 时通过 beforeSpawn 检索并注入该反思。验证数据流从信号解析→反思生成→存储→检索→注入的完整路径。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]"
+      ],
+      "scope": [
+        "afterTask → 存储 → beforeSpawn 的完整数据流验证",
+        "跨 hook 的反思数据一致性验证",
+        "task_type 维度的反思相关性验证"
+      ],
+      "out_of_scope": [
+        "反思注入对 agent 行为改善的效果评估",
+        "并发任务完成场景",
+        "与 Phase 1 memory 系统的交互"
+      ],
+      "fr_refs": [
+        "FR-6",
+        "FR-7"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-3.1",
+      "phase_id": 3,
+      "story_id": "STORY-E2E-PIPELINE",
+      "task_role": "integrate",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "depends": [
+        "TASK-BE-1.4",
+        "TASK-BE-2.6"
+      ],
+      "title": "Wire all 3 hooks into OpenClaw plugin entry point with unified configuration and error handling",
+      "description": "实现 OpenClaw 插件入口，将 beforeTurn、afterTask、beforeSpawn 三个 hook 统一注册到插件对象中，配置统一的错误处理（silent degradation），确保所有 hook 可被 OpenClaw 主进程正确调用。插件初始化时自动完成存储层、搜索引擎、LLM 客户端的依赖注入。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]"
+      ],
+      "scope": [
+        "插件入口模块",
+        "三个 hook 的统一注册",
+        "依赖注入与初始化",
+        "统一错误处理（silent degradation）",
+        "配置管理与默认值"
+      ],
+      "out_of_scope": [
+        "各 hook 内部的业务逻辑实现（已在 Phase 1/2 完成）",
+        "LLM 客户端实现",
+        "存储层实现"
+      ],
+      "fr_refs": [
+        "FR-1",
+        "FR-2",
+        "FR-5",
+        "FR-6",
+        "FR-7"
+      ],
+      "complexity_exception": false
+    },
+    {
+      "id": "TASK-BE-3.2",
+      "phase_id": 3,
+      "story_id": "STORY-E2E-PIPELINE",
+      "task_role": "verify",
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-API-HOOK-AFTER-TASK",
+        "CAP-BE-API-HOOK-BEFORE-SPAWN",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY",
+        "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-CONST-LLM-COST-TARGET"
+      ],
+      "depends": [
+        "TASK-BE-3.1",
+        "TASK-BE-0.5",
+        "TASK-BE-1.4",
+        "TASK-BE-2.6"
+      ],
+      "title": "End-to-end smoke test: full conversation lifecycle from extraction through injection",
+      "description": "端到端烟测覆盖完整的 LearnLoop 生命周期：Session N 对话产生记忆 → Session N+1 的 beforeTurn 触发懒提取 + 记忆注入 → 任务完成触发 afterTask 反思生成 → 新子任务 beforeSpawn 注入相关反思。验证数据在各模块间正确流转、冲突检测生效、非阻塞约束满足、静默降级有效、检索延迟达标。",
+      "design_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]",
+        "docs/design/backend.json#constraints[id=llm-cost-target]",
+        "docs/design/backend.json#constraints[id=non-blocking-extraction]",
+        "docs/design/backend.json#constraints[id=non-blocking-reflection]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]"
+      ],
+      "scope": [
+        "beforeTurn → lazy extraction → memory injection 全链路",
+        "afterTask → reflection generation → storage 全链路",
+        "beforeSpawn → reflection retrieval → injection 全链路",
+        "冲突检测 upsert 端到端验证",
+        "access tracking 端到端验证",
+        "非阻塞约束验证",
+        "静默降级端到端验证",
+        "检索延迟性能验证"
+      ],
+      "out_of_scope": [
+        "LLM prompt 质量评估",
+        "实际 GPT-4o-mini 调用（使用 mock）",
+        "ExpeL 规则蒸馏",
+        "向量嵌入检索"
+      ],
+      "fr_refs": [
+        "FR-1",
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5",
+        "FR-6",
+        "FR-7"
+      ],
+      "complexity_exception": false
+    }
+  ]
+}

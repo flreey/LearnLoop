@@ -1,0 +1,968 @@
+{
+  "version": 1,
+  "generated_at": "2026-03-01T10:41:07.081Z",
+  "capabilities": [
+    {
+      "id": "CAP-BE-ALGO-LAZY-EXTRACTION-CHECK",
+      "domain": "lazy-extraction-check",
+      "type": "backend",
+      "title": "Algorithm: Lazy Extraction Eligibility Check",
+      "contract_refs": [
+        "docs/design/backend.json#algorithms[id=lazy-extraction-check]"
+      ],
+      "source_keys": [
+        "algorithms"
+      ],
+      "keywords": [
+        "lazy-extraction-check",
+        "Lazy Extraction Eligibility Check",
+        "previous-session",
+        "unprocessed-check",
+        "session-boundary",
+        "state-transition"
+      ],
+      "primary_verifier": "tests/lazy-extraction-check/algo-lazy-extraction-check.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-SESSION-STATE"
+      ]
+    },
+    {
+      "id": "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+      "domain": "memory-conflict-detection",
+      "type": "backend",
+      "title": "Algorithm: Memory Conflict Detection and Upsert",
+      "contract_refs": [
+        "docs/design/backend.json#algorithms[id=memory-conflict-detection]"
+      ],
+      "source_keys": [
+        "algorithms"
+      ],
+      "keywords": [
+        "memory-conflict-detection",
+        "Memory Conflict Detection and Upsert",
+        "subject-match",
+        "upsert",
+        "deduplication",
+        "timestamp-update",
+        "idempotency"
+      ],
+      "primary_verifier": "tests/memory-conflict-detection/algo-memory-conflict-detection.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-RULE-MEMORY-CONFLICT-UPSERT"
+      ]
+    },
+    {
+      "id": "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+      "domain": "signal-outcome-resolution",
+      "type": "backend",
+      "title": "Algorithm: Task Outcome Signal Resolution",
+      "contract_refs": [
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]"
+      ],
+      "source_keys": [
+        "algorithms"
+      ],
+      "keywords": [
+        "signal-outcome-resolution",
+        "Task Outcome Signal Resolution",
+        "user-feedback-parsing",
+        "respawn-detection",
+        "timeout-detection",
+        "review-result",
+        "multi-signal-conflict",
+        "failure-semantics"
+      ],
+      "primary_verifier": "tests/signal-outcome-resolution/algo-signal-outcome-resolution.test.ts",
+      "depends_on": [
+        "CAP-BE-SEED-SIGNAL-PATTERNS",
+        "CAP-BE-SEED-OUTCOME-TYPES"
+      ]
+    },
+    {
+      "id": "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+      "domain": "tri-dimensional-retrieval",
+      "type": "backend",
+      "title": "Algorithm: Tri-Dimensional Memory Retrieval Scoring",
+      "contract_refs": [
+        "docs/design/backend.json#algorithms[id=tri-dimensional-retrieval]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "source_keys": [
+        "algorithms"
+      ],
+      "keywords": [
+        "tri-dimensional-retrieval",
+        "Tri-Dimensional Memory Retrieval Scoring",
+        "recency-decay",
+        "exponential-decay",
+        "bm25-relevance",
+        "importance-score",
+        "configurable-weights",
+        "lambda-coefficient"
+      ],
+      "primary_verifier": "tests/tri-dimensional-retrieval/algo-tri-dimensional-retrieval.test.ts",
+      "depends_on": [
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-SEED-RETRIEVAL-CONFIG",
+        "CAP-BE-DATA-MEMORY"
+      ]
+    },
+    {
+      "id": "CAP-BE-API-HOOK-AFTER-TASK",
+      "domain": "core",
+      "type": "backend",
+      "title": "HOOK afterTask",
+      "contract_refs": [
+        "docs/design/backend.json#endpoints[id=hook-after-task]",
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]",
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]"
+      ],
+      "source_keys": [
+        "endpoints"
+      ],
+      "keywords": [
+        "hook-after-task",
+        "afterTask",
+        "HOOK",
+        "core",
+        "reflection-trigger",
+        "signal-resolution",
+        "success-failure-detection",
+        "non-blocking",
+        "silent-degradation"
+      ],
+      "primary_verifier": "tests/core/api-hook-after-task.test.ts",
+      "depends_on": [
+        "CAP-BE-RULE-REFLECTION-GENERATION-ON-TASK-COMPLETE",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+        "CAP-BE-DATA-REFLECTION"
+      ]
+    },
+    {
+      "id": "CAP-BE-API-HOOK-BEFORE-SPAWN",
+      "domain": "core",
+      "type": "backend",
+      "title": "HOOK beforeSpawn",
+      "contract_refs": [
+        "docs/design/backend.json#endpoints[id=hook-before-spawn]",
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]"
+      ],
+      "source_keys": [
+        "endpoints"
+      ],
+      "keywords": [
+        "hook-before-spawn",
+        "beforeSpawn",
+        "HOOK",
+        "core",
+        "reflection-injection",
+        "subtask-dispatch",
+        "synchronous-injection",
+        "bm25-search"
+      ],
+      "primary_verifier": "tests/core/api-hook-before-spawn.test.ts",
+      "depends_on": [
+        "CAP-BE-RULE-REFLECTION-INJECTION-ON-SPAWN",
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE"
+      ]
+    },
+    {
+      "id": "CAP-BE-API-HOOK-BEFORE-TURN",
+      "domain": "core",
+      "type": "backend",
+      "title": "HOOK beforeTurn",
+      "contract_refs": [
+        "docs/design/backend.json#endpoints[id=hook-before-turn]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]"
+      ],
+      "source_keys": [
+        "endpoints"
+      ],
+      "keywords": [
+        "hook-before-turn",
+        "beforeTurn",
+        "HOOK",
+        "core",
+        "lazy-extraction",
+        "memory-injection",
+        "session-start",
+        "async-extraction",
+        "synchronous-injection"
+      ],
+      "primary_verifier": "tests/core/api-hook-before-turn.test.ts",
+      "depends_on": [
+        "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+        "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+        "CAP-BE-DATA-SESSION-STATE",
+        "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL"
+      ]
+    },
+    {
+      "id": "CAP-BE-API-INTERNAL-EXTRACT-MEMORIES",
+      "domain": "core",
+      "type": "backend",
+      "title": "INTERNAL extractMemories",
+      "contract_refs": [
+        "docs/design/backend.json#endpoints[id=internal-extract-memories]",
+        "docs/design/backend.json#integrations[id=llm-memory-extraction]",
+        "docs/design/backend.json#constraints[id=llm-cost-target]"
+      ],
+      "source_keys": [
+        "endpoints"
+      ],
+      "keywords": [
+        "internal-extract-memories",
+        "extractMemories",
+        "INTERNAL",
+        "core",
+        "llm-call",
+        "gpt-4o-mini",
+        "async",
+        "silent-degradation",
+        "cost-budget",
+        "memory-types"
+      ],
+      "primary_verifier": "tests/core/api-internal-extract-memories.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-INTG-LLM-MEMORY-EXTRACTION",
+        "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+        "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+        "CAP-BE-CONST-LLM-COST-TARGET",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-SEED-MEMORY-TYPES"
+      ]
+    },
+    {
+      "id": "CAP-BE-API-INTERNAL-GENERATE-REFLECTION",
+      "domain": "core",
+      "type": "backend",
+      "title": "INTERNAL generateReflection",
+      "contract_refs": [
+        "docs/design/backend.json#endpoints[id=internal-generate-reflection]",
+        "docs/design/backend.json#integrations[id=llm-reflection-generation]",
+        "docs/design/backend.json#algorithms[id=signal-outcome-resolution]"
+      ],
+      "source_keys": [
+        "endpoints"
+      ],
+      "keywords": [
+        "internal-generate-reflection",
+        "generateReflection",
+        "INTERNAL",
+        "core",
+        "llm-call",
+        "gpt-4o-mini",
+        "async",
+        "silent-degradation",
+        "cost-budget",
+        "outcome-resolution"
+      ],
+      "primary_verifier": "tests/core/api-internal-generate-reflection.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+        "CAP-BE-CONST-LLM-COST-TARGET",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-SEED-OUTCOME-TYPES",
+        "CAP-BE-SEED-SIGNAL-PATTERNS"
+      ]
+    },
+    {
+      "id": "CAP-BE-API-INTERNAL-RETRIEVE-MEMORIES",
+      "domain": "core",
+      "type": "backend",
+      "title": "INTERNAL retrieveMemories",
+      "contract_refs": [
+        "docs/design/backend.json#endpoints[id=internal-retrieve-memories]",
+        "docs/design/backend.json#algorithms[id=tri-dimensional-retrieval]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]"
+      ],
+      "source_keys": [
+        "endpoints"
+      ],
+      "keywords": [
+        "internal-retrieve-memories",
+        "retrieveMemories",
+        "INTERNAL",
+        "core",
+        "tri-dimensional-scoring",
+        "bm25",
+        "recency-decay",
+        "ranked-results",
+        "synchronous",
+        "latency-constraint"
+      ],
+      "primary_verifier": "tests/core/api-internal-retrieve-memories.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY",
+        "CAP-BE-RULE-ACCESS-TRACKING",
+        "CAP-BE-SEED-RETRIEVAL-CONFIG"
+      ]
+    },
+    {
+      "id": "CAP-BE-API-INTERNAL-RETRIEVE-REFLECTIONS",
+      "domain": "core",
+      "type": "backend",
+      "title": "INTERNAL retrieveReflections",
+      "contract_refs": [
+        "docs/design/backend.json#endpoints[id=internal-retrieve-reflections]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]"
+      ],
+      "source_keys": [
+        "endpoints"
+      ],
+      "keywords": [
+        "internal-retrieve-reflections",
+        "retrieveReflections",
+        "INTERNAL",
+        "core",
+        "bm25",
+        "task-type-search",
+        "ranked-results",
+        "synchronous",
+        "latency-constraint"
+      ],
+      "primary_verifier": "tests/core/api-internal-retrieve-reflections.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-REFLECTION",
+        "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ]
+    },
+    {
+      "id": "CAP-BE-CONST-DATA-LOCALITY",
+      "domain": "data-locality",
+      "type": "backend",
+      "title": "Constraint: data-locality",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=data-locality]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "data-locality",
+        "all data storage",
+        "local-filesystem",
+        "no-external-transmission",
+        "privacy",
+        "home-directory-path"
+      ],
+      "primary_verifier": "tests/data-locality/const-data-locality.test.ts",
+      "depends_on": []
+    },
+    {
+      "id": "CAP-BE-CONST-DB-AUTO-CREATE",
+      "domain": "db-auto-create",
+      "type": "backend",
+      "title": "Constraint: db-auto-create",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=db-auto-create]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "db-auto-create",
+        "database initialization",
+        "first-write-init",
+        "directory-creation",
+        "schema-migration",
+        "startup-behavior"
+      ],
+      "primary_verifier": "tests/db-auto-create/const-db-auto-create.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-DATA-LOCALITY"
+      ]
+    },
+    {
+      "id": "CAP-BE-CONST-LLM-COST-TARGET",
+      "domain": "llm-cost-target",
+      "type": "backend",
+      "title": "Constraint: llm-cost-target",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=llm-cost-target]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "llm-cost-target",
+        "all LLM calls (extraction and reflection)",
+        "0.002-dollar-per-call",
+        "budget-threshold",
+        "gpt-4o-mini"
+      ],
+      "primary_verifier": "tests/llm-cost-target/const-llm-cost-target.test.ts",
+      "depends_on": []
+    },
+    {
+      "id": "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+      "domain": "non-blocking-extraction",
+      "type": "backend",
+      "title": "Constraint: non-blocking-extraction",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=non-blocking-extraction]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "non-blocking-extraction",
+        "memory extraction (beforeTurn hook)",
+        "async",
+        "fire-and-forget",
+        "no-conversation-delay",
+        "failure-semantics"
+      ],
+      "primary_verifier": "tests/non-blocking-extraction/const-non-blocking-extraction.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ]
+    },
+    {
+      "id": "CAP-BE-CONST-NON-BLOCKING-REFLECTION",
+      "domain": "non-blocking-reflection",
+      "type": "backend",
+      "title": "Constraint: non-blocking-reflection",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=non-blocking-reflection]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "non-blocking-reflection",
+        "reflection generation (afterTask hook)",
+        "async",
+        "fire-and-forget",
+        "no-task-delay",
+        "failure-semantics"
+      ],
+      "primary_verifier": "tests/non-blocking-reflection/const-non-blocking-reflection.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ]
+    },
+    {
+      "id": "CAP-BE-CONST-RETRIEVAL-LATENCY",
+      "domain": "retrieval-latency",
+      "type": "backend",
+      "title": "Constraint: retrieval-latency",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=retrieval-latency]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "retrieval-latency",
+        "memory retrieval and reflection retrieval",
+        "100ms-threshold",
+        "1000-entries-cap",
+        "performance-sla"
+      ],
+      "primary_verifier": "tests/retrieval-latency/const-retrieval-latency.test.ts",
+      "depends_on": []
+    },
+    {
+      "id": "CAP-BE-CONST-SILENT-DEGRADATION",
+      "domain": "silent-degradation",
+      "type": "backend",
+      "title": "Constraint: silent-degradation",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=silent-degradation]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "silent-degradation",
+        "all LLM calls and non-critical operations",
+        "error-swallow",
+        "no-user-impact",
+        "graceful-failure",
+        "try-catch-boundary",
+        "failure-semantics"
+      ],
+      "primary_verifier": "tests/silent-degradation/const-silent-degradation.test.ts",
+      "depends_on": []
+    },
+    {
+      "id": "CAP-BE-CONST-STORAGE-FOOTPRINT",
+      "domain": "storage-footprint",
+      "type": "backend",
+      "title": "Constraint: storage-footprint",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=storage-footprint]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "storage-footprint",
+        "database size",
+        "10mb-per-month",
+        "1000-memories",
+        "200-reflections",
+        "quota"
+      ],
+      "primary_verifier": "tests/storage-footprint/const-storage-footprint.test.ts",
+      "depends_on": []
+    },
+    {
+      "id": "CAP-BE-CONST-SYNCHRONOUS-INJECTION",
+      "domain": "synchronous-injection",
+      "type": "backend",
+      "title": "Constraint: synchronous-injection",
+      "contract_refs": [
+        "docs/design/backend.json#constraints[id=synchronous-injection]"
+      ],
+      "source_keys": [
+        "constraints"
+      ],
+      "keywords": [
+        "synchronous-injection",
+        "memory injection (beforeTurn) and reflection injection (beforeSpawn)",
+        "blocking-before-response",
+        "context-ready-guarantee",
+        "latency-critical"
+      ],
+      "primary_verifier": "tests/synchronous-injection/const-synchronous-injection.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-RETRIEVAL-LATENCY"
+      ]
+    },
+    {
+      "id": "CAP-BE-DATA-MEMORY",
+      "domain": "memory",
+      "type": "backend",
+      "title": "Data model: memories",
+      "contract_refs": [
+        "docs/design/backend.json#entities[id=memory]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "source_keys": [
+        "entities"
+      ],
+      "keywords": [
+        "memory",
+        "memories",
+        "uuid",
+        "preference",
+        "fact",
+        "entity",
+        "episode",
+        "confidence-score",
+        "importance-score",
+        "access-count",
+        "subject-field",
+        "source-session"
+      ],
+      "primary_verifier": "tests/memory/data-memory.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-DB-AUTO-CREATE",
+        "CAP-BE-SEED-MEMORY-TYPES"
+      ]
+    },
+    {
+      "id": "CAP-BE-DATA-REFLECTION",
+      "domain": "reflection",
+      "type": "backend",
+      "title": "Data model: reflections",
+      "contract_refs": [
+        "docs/design/backend.json#entities[id=reflection]"
+      ],
+      "source_keys": [
+        "entities"
+      ],
+      "keywords": [
+        "reflection",
+        "reflections",
+        "uuid",
+        "task-type",
+        "outcome",
+        "signals-array",
+        "lessons-array",
+        "agent-id",
+        "success",
+        "failure",
+        "partial"
+      ],
+      "primary_verifier": "tests/reflection/data-reflection.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-DB-AUTO-CREATE",
+        "CAP-BE-SEED-OUTCOME-TYPES"
+      ]
+    },
+    {
+      "id": "CAP-BE-DATA-SESSION-STATE",
+      "domain": "session-state",
+      "type": "backend",
+      "title": "Data model: session_states",
+      "contract_refs": [
+        "docs/design/backend.json#entities[id=session_state]"
+      ],
+      "source_keys": [
+        "entities"
+      ],
+      "keywords": [
+        "session_state",
+        "session_states",
+        "session-state",
+        "processed-flag",
+        "session-boundary",
+        "extraction-tracking",
+        "state-transition"
+      ],
+      "primary_verifier": "tests/session-state/data-session-state.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-DB-AUTO-CREATE"
+      ]
+    },
+    {
+      "id": "CAP-BE-INTG-BM25-SEARCH-ENGINE",
+      "domain": "bm25-search-engine",
+      "type": "backend",
+      "title": "Integration: MiniSearch",
+      "contract_refs": [
+        "docs/design/backend.json#integrations[id=bm25-search-engine]"
+      ],
+      "source_keys": [
+        "integrations"
+      ],
+      "keywords": [
+        "bm25-search-engine",
+        "MiniSearch",
+        "minisearch",
+        "flexsearch",
+        "cjk-tokenization",
+        "text-matching",
+        "lightweight",
+        "8kb-footprint"
+      ],
+      "primary_verifier": "tests/bm25-search-engine/intg-bm25-search-engine.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-MEMORY",
+        "CAP-BE-DATA-REFLECTION"
+      ]
+    },
+    {
+      "id": "CAP-BE-INTG-LLM-MEMORY-EXTRACTION",
+      "domain": "llm-memory-extraction",
+      "type": "backend",
+      "title": "Integration: OpenClaw LLM Proxy (GPT-4o-mini)",
+      "contract_refs": [
+        "docs/design/backend.json#integrations[id=llm-memory-extraction]"
+      ],
+      "source_keys": [
+        "integrations"
+      ],
+      "keywords": [
+        "llm-memory-extraction",
+        "OpenClaw LLM Proxy (GPT-4o-mini)",
+        "gpt-4o-mini",
+        "openclaw-proxy",
+        "cost-budget",
+        "silent-degradation",
+        "async-call",
+        "failure-semantics"
+      ],
+      "primary_verifier": "tests/llm-memory-extraction/intg-llm-memory-extraction.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-LLM-COST-TARGET",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ]
+    },
+    {
+      "id": "CAP-BE-INTG-LLM-REFLECTION-GENERATION",
+      "domain": "llm-reflection-generation",
+      "type": "backend",
+      "title": "Integration: OpenClaw LLM Proxy (GPT-4o-mini)",
+      "contract_refs": [
+        "docs/design/backend.json#integrations[id=llm-reflection-generation]"
+      ],
+      "source_keys": [
+        "integrations"
+      ],
+      "keywords": [
+        "llm-reflection-generation",
+        "OpenClaw LLM Proxy (GPT-4o-mini)",
+        "gpt-4o-mini",
+        "openclaw-proxy",
+        "cost-budget",
+        "silent-degradation",
+        "async-call",
+        "failure-semantics"
+      ],
+      "primary_verifier": "tests/llm-reflection-generation/intg-llm-reflection-generation.test.ts",
+      "depends_on": [
+        "CAP-BE-CONST-LLM-COST-TARGET",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ]
+    },
+    {
+      "id": "CAP-BE-RULE-ACCESS-TRACKING",
+      "domain": "access-tracking",
+      "type": "backend",
+      "title": "Business rule: Memory Access Count and Timestamp Tracking",
+      "contract_refs": [
+        "docs/design/backend.json#business_rules[id=access-tracking]"
+      ],
+      "source_keys": [
+        "business_rules"
+      ],
+      "keywords": [
+        "access-tracking",
+        "Memory Access Count and Timestamp Tracking",
+        "access-count-increment",
+        "last-accessed-timestamp",
+        "recency-support",
+        "read-side-effect"
+      ],
+      "primary_verifier": "tests/access-tracking/rule-access-tracking.test.ts",
+      "depends_on": [
+        "CAP-BE-DATA-MEMORY"
+      ]
+    },
+    {
+      "id": "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+      "domain": "lazy-extraction-trigger",
+      "type": "backend",
+      "title": "Business rule: Lazy Memory Extraction Trigger",
+      "contract_refs": [
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]"
+      ],
+      "source_keys": [
+        "business_rules"
+      ],
+      "keywords": [
+        "lazy-extraction-trigger",
+        "Lazy Memory Extraction Trigger",
+        "session-boundary",
+        "previous-session-check",
+        "async-dispatch",
+        "no-block"
+      ],
+      "primary_verifier": "tests/lazy-extraction-trigger/rule-lazy-extraction-trigger.test.ts",
+      "depends_on": [
+        "CAP-BE-ALGO-LAZY-EXTRACTION-CHECK",
+        "CAP-BE-API-INTERNAL-EXTRACT-MEMORIES",
+        "CAP-BE-DATA-SESSION-STATE",
+        "CAP-BE-CONST-NON-BLOCKING-EXTRACTION"
+      ]
+    },
+    {
+      "id": "CAP-BE-RULE-MEMORY-CONFLICT-UPSERT",
+      "domain": "memory-conflict-upsert",
+      "type": "backend",
+      "title": "Business rule: Memory Conflict Detection and Update",
+      "contract_refs": [
+        "docs/design/backend.json#business_rules[id=memory-conflict-upsert]"
+      ],
+      "source_keys": [
+        "business_rules"
+      ],
+      "keywords": [
+        "memory-conflict-upsert",
+        "Memory Conflict Detection and Update",
+        "subject-matching",
+        "upsert-semantics",
+        "timestamp-update",
+        "deduplication",
+        "idempotency"
+      ],
+      "primary_verifier": "tests/memory-conflict-upsert/rule-memory-conflict-upsert.test.ts",
+      "depends_on": [
+        "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+        "CAP-BE-DATA-MEMORY"
+      ]
+    },
+    {
+      "id": "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+      "domain": "memory-injection-on-turn",
+      "type": "backend",
+      "title": "Business rule: Memory Context Injection on Turn Start",
+      "contract_refs": [
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]"
+      ],
+      "source_keys": [
+        "business_rules"
+      ],
+      "keywords": [
+        "memory-injection-on-turn",
+        "Memory Context Injection on Turn Start",
+        "context-injection",
+        "system-prompt",
+        "top-n-selection",
+        "synchronous",
+        "token-budget"
+      ],
+      "primary_verifier": "tests/memory-injection-on-turn/rule-memory-injection-on-turn.test.ts",
+      "depends_on": [
+        "CAP-BE-API-INTERNAL-RETRIEVE-MEMORIES",
+        "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+      ]
+    },
+    {
+      "id": "CAP-BE-RULE-REFLECTION-GENERATION-ON-TASK-COMPLETE",
+      "domain": "reflection-generation-on-task-complete",
+      "type": "backend",
+      "title": "Business rule: Post-Task Reflection Generation",
+      "contract_refs": [
+        "docs/design/backend.json#business_rules[id=reflection-generation-on-task-complete]"
+      ],
+      "source_keys": [
+        "business_rules"
+      ],
+      "keywords": [
+        "reflection-generation-on-task-complete",
+        "Post-Task Reflection Generation",
+        "subtask-completion",
+        "signal-collection",
+        "async-generation",
+        "user-feedback",
+        "respawn-failure",
+        "timeout-failure",
+        "review-result"
+      ],
+      "primary_verifier": "tests/reflection-generation-on-task-complete/rule-reflection-generation-on-task-complete.test.ts",
+      "depends_on": [
+        "CAP-BE-API-INTERNAL-GENERATE-REFLECTION",
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION",
+        "CAP-BE-CONST-NON-BLOCKING-REFLECTION"
+      ]
+    },
+    {
+      "id": "CAP-BE-RULE-REFLECTION-INJECTION-ON-SPAWN",
+      "domain": "reflection-injection-on-spawn",
+      "type": "backend",
+      "title": "Business rule: Reflection Injection Before Subtask Dispatch",
+      "contract_refs": [
+        "docs/design/backend.json#business_rules[id=reflection-injection-on-spawn]"
+      ],
+      "source_keys": [
+        "business_rules"
+      ],
+      "keywords": [
+        "reflection-injection-on-spawn",
+        "Reflection Injection Before Subtask Dispatch",
+        "task-description-augmentation",
+        "bm25-search",
+        "synchronous",
+        "subtask-context"
+      ],
+      "primary_verifier": "tests/reflection-injection-on-spawn/rule-reflection-injection-on-spawn.test.ts",
+      "depends_on": [
+        "CAP-BE-API-INTERNAL-RETRIEVE-REFLECTIONS",
+        "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+      ]
+    },
+    {
+      "id": "CAP-BE-SEED-MEMORY-TYPES",
+      "domain": "memory-types",
+      "type": "backend",
+      "title": "Seed data: memory_types",
+      "contract_refs": [
+        "docs/design/backend.json#seed_data"
+      ],
+      "source_keys": [
+        "seed_data"
+      ],
+      "keywords": [
+        "memory_types",
+        "memory-types",
+        "preference",
+        "fact",
+        "entity",
+        "episode",
+        "enum-constraint"
+      ],
+      "primary_verifier": "tests/memory-types/seed-memory-types.test.ts",
+      "depends_on": []
+    },
+    {
+      "id": "CAP-BE-SEED-OUTCOME-TYPES",
+      "domain": "outcome-types",
+      "type": "backend",
+      "title": "Seed data: outcome_types",
+      "contract_refs": [
+        "docs/design/backend.json#seed_data"
+      ],
+      "source_keys": [
+        "seed_data"
+      ],
+      "keywords": [
+        "outcome_types",
+        "outcome-types",
+        "success",
+        "failure",
+        "partial",
+        "enum-constraint"
+      ],
+      "primary_verifier": "tests/outcome-types/seed-outcome-types.test.ts",
+      "depends_on": []
+    },
+    {
+      "id": "CAP-BE-SEED-RETRIEVAL-CONFIG",
+      "domain": "retrieval-config",
+      "type": "backend",
+      "title": "Seed data: retrieval_config",
+      "contract_refs": [
+        "docs/design/backend.json#seed_data"
+      ],
+      "source_keys": [
+        "seed_data"
+      ],
+      "keywords": [
+        "retrieval_config",
+        "retrieval-config",
+        "weight-a-0.3",
+        "weight-b-0.5",
+        "weight-c-0.2",
+        "lambda-0.01",
+        "configurable"
+      ],
+      "primary_verifier": "tests/retrieval-config/seed-retrieval-config.test.ts",
+      "depends_on": [
+        "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL"
+      ]
+    },
+    {
+      "id": "CAP-BE-SEED-SIGNAL-PATTERNS",
+      "domain": "signal-patterns",
+      "type": "backend",
+      "title": "Seed data: signal_patterns",
+      "contract_refs": [
+        "docs/design/backend.json#seed_data"
+      ],
+      "source_keys": [
+        "seed_data"
+      ],
+      "keywords": [
+        "signal_patterns",
+        "signal-patterns",
+        "user-feedback-positive",
+        "user-feedback-negative",
+        "respawn-failure",
+        "review-pass",
+        "review-fail",
+        "timeout-failure"
+      ],
+      "primary_verifier": "tests/signal-patterns/seed-signal-patterns.test.ts",
+      "depends_on": [
+        "CAP-BE-ALGO-SIGNAL-OUTCOME-RESOLUTION"
+      ]
+    }
+  ]
+}

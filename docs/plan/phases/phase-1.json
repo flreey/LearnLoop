@@ -1,0 +1,484 @@
+{
+  "id": 1,
+  "name": "Intelligent Memory — Extraction, Conflict Detection, Retrieval & Injection",
+  "type": "backend",
+  "tasks": [
+    {
+      "id": "TASK-BE-1.1",
+      "title": "实现 LLM 记忆提取与冲突检测 upsert 逻辑",
+      "description": "实现从对话历史中通过 LLM 提取记忆条目的核心逻辑，包括：构造提取 prompt 并调用 LLM、解析返回的记忆数组、对每条新记忆执行冲突检测（同 subject + 同 type 则 update，否则 insert）、以及懒提取资格检查算法。提取过程异步非阻塞，LLM 调用失败时静默降级返回空数组。",
+      "acceptance_criteria": [
+        "调用 extractMemories 传入 session_key 和 conversation_history，返回结构包含 extracted 数组和 conflicts_resolved 计数",
+        "extracted 数组中每条记忆包含 type（preference|fact|entity|episode）、content、subject、confidence（0-1）、importance（0-1）字段",
+        "LLM 返回的记忆条目成功写入存储，可通过存储层按 subject 查询到",
+        "新记忆与已有记忆 subject 和 type 均相同时，更新已有记忆的 content、confidence、importance、updated_at，保留原 id、created_at、source_session、access_count",
+        "新记忆与已有记忆 subject 相同但 type 不同时，作为新条目插入而非更新",
+        "存储中无同 subject 记忆时，新记忆直接插入",
+        "conflicts_resolved 计数等于实际执行 update 操作的次数",
+        "lazily extraction check：previous_session_key 为 null 时返回 should_extract=false",
+        "lazily extraction check：previous_session_key 对应的 session_states 记录 extracted=0 或无记录时返回 should_extract=true",
+        "lazily extraction check：previous_session_key 对应的 session_states 记录 extracted=1 时返回 should_extract=false",
+        "LLM 调用失败（网络错误/API 错误）时，extractMemories 返回空 extracted 数组且 conflicts_resolved=0，不抛出异常",
+        "对话内容无可提取记忆时（LLM 返回空数组），extractMemories 返回空 extracted 数组"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "成功从对话历史提取记忆并持久化",
+          "given": [
+            "存储中无任何记忆条目",
+            "存在一段包含用户偏好信息的对话历史"
+          ],
+          "when": "调用 extractMemories 传入该对话历史",
+          "then": [
+            "返回的 extracted 数组长度 > 0",
+            "存储中可查询到对应 subject 的记忆条目"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "冲突记忆触发更新而非重复插入",
+          "given": [
+            "存储中已有 subject='user-lang' type='preference' 的记忆，content 为旧值"
+          ],
+          "when": "extractMemories 提取出同 subject 同 type 但不同 content 的记忆",
+          "then": [
+            "存储中 subject='user-lang' type='preference' 的记忆仅有一条",
+            "该记忆的 content 为新值",
+            "该记忆的 updated_at 晚于 created_at"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "LLM 调用失败时静默降级",
+          "given": [
+            "LLM 服务不可用"
+          ],
+          "when": "调用 extractMemories",
+          "then": [
+            "返回空 extracted 数组",
+            "不抛出异常",
+            "已有存储数据不受影响"
+          ]
+        },
+        {
+          "type": "unit",
+          "name": "懒提取检查正确判定已提取的 session",
+          "given": [
+            "session_states 表中 session_key='s1' 的记录 extracted=1"
+          ],
+          "when": "对 session_key='s1' 执行 lazy extraction check",
+          "then": [
+            "返回 should_extract=false"
+          ]
+        }
+      ],
+      "scope": [
+        "extractMemories 内部函数实现",
+        "LLM 提取 prompt 构造与响应解析",
+        "冲突检测算法（同 subject + 同 type 判定）",
+        "冲突 upsert 逻辑（update vs insert）",
+        "lazy extraction eligibility check 算法",
+        "LLM 调用失败的静默降级处理"
+      ],
+      "out_of_scope": [
+        "beforeTurn hook 编排逻辑（由 sibling task 实现）",
+        "记忆检索与注入",
+        "反射生成",
+        "BM25 搜索引擎初始化（Phase 0 已实现）"
+      ],
+      "story_id": "STORY-MEMORY-EXTRACTION",
+      "task_role": "implement",
+      "fr_refs": [
+        "FR-2",
+        "FR-3"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-INTERNAL-EXTRACT-MEMORIES",
+        "CAP-BE-INTG-LLM-MEMORY-EXTRACTION",
+        "CAP-BE-ALGO-LAZY-EXTRACTION-CHECK",
+        "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+        "CAP-BE-RULE-MEMORY-CONFLICT-UPSERT",
+        "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+        "CAP-BE-CONST-NON-BLOCKING-EXTRACTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION",
+        "CAP-BE-CONST-LLM-COST-TARGET"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=lazy-extraction-check]",
+        "docs/design/backend.json#algorithms[id=memory-conflict-detection]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-conflict-upsert]",
+        "docs/design/backend.json#constraints[id=llm-cost-target]",
+        "docs/design/backend.json#constraints[id=non-blocking-extraction]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=internal-extract-memories]",
+        "docs/design/backend.json#integrations[id=llm-memory-extraction]"
+      ],
+      "depends": [
+        "TASK-BE-0.5"
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T12:26:47.739Z"
+    },
+    {
+      "id": "TASK-BE-1.2",
+      "title": "实现三维记忆检索算法与记忆上下文注入",
+      "description": "实现三维检索评分算法（recency 时间衰减 + BM25 relevance + importance 加权），将检索结果注入对话上下文。包括：BM25 搜索获取相关性分数、指数时间衰减计算、加权综合评分与排序、Top-N 截取、访问计数与时间戳追踪更新、以及将检索到的记忆格式化注入 system prompt 或 context。",
+      "acceptance_criteria": [
+        "retrieveMemories 传入 query 和 limit，返回结构包含 memories 数组，按 score 降序排列",
+        "每条返回记忆包含原始字段及计算得到的 score 值",
+        "score 计算公式：score = a * recency + b * relevance + c * importance，默认权重 a=0.3, b=0.5, c=0.2",
+        "recency 计算：exp(-lambda * hours_since_last_access)，lambda 默认 0.01，使用 last_accessed_at 或 updated_at",
+        "relevance 分数来自 BM25 搜索结果，归一化到 0-1 范围",
+        "importance 直接取记忆条目的 importance 字段（0-1）",
+        "返回结果数量不超过传入的 limit 参数",
+        "传入自定义 weights 时使用自定义值覆盖默认权重",
+        "检索返回的每条记忆，其 access_count 递增 1，last_accessed_at 更新为当前时间",
+        "未被返回的记忆（不在 Top-N 中）的 access_count 和 last_accessed_at 不变",
+        "query 与所有记忆均不相关时（BM25 无匹配），返回空 memories 数组",
+        "存储中有 1000 条记忆时，检索延迟 < 100ms"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "检索返回按综合评分排序的记忆列表",
+          "given": [
+            "存储中有多条不同 subject、importance、创建时间的记忆"
+          ],
+          "when": "调用 retrieveMemories 传入与部分记忆相关的 query，limit=5",
+          "then": [
+            "返回的 memories 数组长度 ≤ 5",
+            "数组按 score 降序排列",
+            "每条记忆包含 score 字段"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "检索后访问追踪自动更新",
+          "given": [
+            "存储中有一条 access_count=3 的记忆，且该记忆与查询相关"
+          ],
+          "when": "调用 retrieveMemories 且该记忆出现在返回结果中",
+          "then": [
+            "该记忆的 access_count 变为 4",
+            "该记忆的 last_accessed_at 为当前时间附近"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "无相关记忆时返回空结果且注入跳过",
+          "given": [
+            "存储中的记忆与当前查询完全无关"
+          ],
+          "when": "调用 retrieveMemories",
+          "then": [
+            "返回空 memories 数组"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "记忆注入将检索结果格式化到上下文中",
+          "given": [
+            "存储中有与当前对话相关的记忆"
+          ],
+          "when": "执行记忆注入流程传入对话上下文",
+          "then": [
+            "输出的上下文中包含检索到的记忆内容",
+            "记忆以可读格式呈现"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "1000 条记忆下检索延迟满足性能要求",
+          "given": [
+            "存储中预填充 1000 条记忆条目"
+          ],
+          "when": "调用 retrieveMemories",
+          "then": [
+            "响应时间 < 100ms"
+          ]
+        }
+      ],
+      "scope": [
+        "三维检索评分算法（recency + relevance + importance）",
+        "BM25 搜索结果归一化",
+        "指数时间衰减函数",
+        "加权评分与排序",
+        "Top-N 截取与 limit 参数",
+        "访问计数与 last_accessed_at 追踪更新",
+        "默认检索配置（权重、lambda、injection limit）",
+        "记忆注入格式化与上下文拼接",
+        "无相关记忆时跳过注入"
+      ],
+      "out_of_scope": [
+        "beforeTurn hook 编排逻辑（由 sibling task 实现）",
+        "记忆提取与冲突检测",
+        "反射检索与注入（beforeSpawn hook）",
+        "BM25 引擎初始化与索引构建（Phase 0 已实现）",
+        "Token 预算管理（PRD 标记为 open question Q3）"
+      ],
+      "story_id": "STORY-MEMORY-RETRIEVAL",
+      "task_role": "implement",
+      "fr_refs": [
+        "FR-4",
+        "FR-5"
+      ],
+      "capability_refs": [
+        "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+        "CAP-BE-API-INTERNAL-RETRIEVE-MEMORIES",
+        "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+        "CAP-BE-RULE-ACCESS-TRACKING",
+        "CAP-BE-SEED-RETRIEVAL-CONFIG",
+        "CAP-BE-CONST-RETRIEVAL-LATENCY",
+        "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=tri-dimensional-retrieval]",
+        "docs/design/backend.json#business_rules[id=access-tracking]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#constraints[id=retrieval-latency]",
+        "docs/design/backend.json#constraints[id=synchronous-injection]",
+        "docs/design/backend.json#endpoints[id=internal-retrieve-memories]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "depends": [],
+      "status": "completed",
+      "error": "Implement step failed",
+      "completed_at": "2026-03-01T13:07:05.705Z"
+    },
+    {
+      "id": "TASK-BE-1.3",
+      "title": "Wire beforeTurn hook to orchestrate lazy extraction check and memory context injection",
+      "description": "实现 beforeTurn hook 处理函数，协调两个职责：1) 检查前一个 session 是否需要 lazy extraction 并异步触发；2) 同步执行 tri-dimensional retrieval 并将相关 memories 注入到当前对话上下文。此 task 是接线层，调用 sibling tasks 已实现的 extraction 和 retrieval 能力。",
+      "acceptance_criteria": [
+        "调用 beforeTurn hook 时传入 previous_session_key 和 conversation_context，返回结果包含 injected_memories 数组和 extraction_triggered 布尔值",
+        "当 previous_session_key 非空且该 session 尚未被提取过时，extraction_triggered 返回 true，且提取过程异步执行不阻塞返回",
+        "当 previous_session_key 为 null 时，extraction_triggered 返回 false，不触发任何提取逻辑",
+        "当 previous_session_key 对应的 session 已被提取过时，extraction_triggered 返回 false",
+        "hook 同步执行 tri-dimensional retrieval，以 conversation_context 作为查询，返回 top-N 条相关 memories（N 由配置 memory_injection_limit 决定）",
+        "当 retrieval 返回空结果时，injected_memories 为空数组，hook 正常返回",
+        "当 extraction 异步调用失败时，hook 仍正常返回 injected_memories 结果，不抛出异常（静默降级）",
+        "当 retrieval 调用失败时，hook 返回空 injected_memories 数组，不抛出异常（静默降级）",
+        "hook 返回的 injected_memories 中每个条目包含 id、type、content、subject、importance 字段"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "首次会话触发前一 session 的 lazy extraction 并注入相关记忆",
+          "given": [
+            "存在前一 session 'session-prev' 的未处理对话历史",
+            "数据库中已有与当前对话上下文相关的 memories"
+          ],
+          "when": "beforeTurn hook 被调用，传入 previous_session_key='session-prev' 和 conversation_context='讨论 TypeScript 项目结构'",
+          "then": [
+            "返回结果中 extraction_triggered 为 true",
+            "返回结果中 injected_memories 非空且包含相关 memory 条目",
+            "hook 调用在 200ms 内返回（同步注入部分）"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "无前一 session 时仅执行记忆注入",
+          "given": [
+            "数据库中已有 memories 数据"
+          ],
+          "when": "beforeTurn hook 被调用，传入 previous_session_key=null 和 conversation_context='如何配置 ESLint'",
+          "then": [
+            "返回结果中 extraction_triggered 为 false",
+            "返回结果中 injected_memories 包含与查询相关的条目"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "LLM extraction 失败时静默降级",
+          "given": [
+            "前一 session 需要提取",
+            "LLM 提取服务不可用"
+          ],
+          "when": "beforeTurn hook 被调用",
+          "then": [
+            "hook 正常返回不抛异常",
+            "injected_memories 仍包含已有的相关记忆",
+            "extraction_triggered 为 true（触发了但异步失败）"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "无相关记忆时返回空注入列表",
+          "given": [
+            "数据库中无任何 memories"
+          ],
+          "when": "beforeTurn hook 被调用，传入任意 conversation_context",
+          "then": [
+            "返回结果中 injected_memories 为空数组",
+            "hook 正常返回不抛异常"
+          ]
+        }
+      ],
+      "scope": [
+        "beforeTurn hook 处理函数",
+        "lazy extraction 触发判断与异步调度",
+        "memory retrieval 调用与结果注入",
+        "静默降级错误处理"
+      ],
+      "out_of_scope": [
+        "lazy extraction 的具体实现（由 sibling task 0 提供）",
+        "tri-dimensional retrieval 算法的具体实现（由 sibling task 1 提供）",
+        "conflict detection 逻辑",
+        "afterTask / beforeSpawn hook"
+      ],
+      "story_id": "STORY-MEMORY-RETRIEVAL",
+      "task_role": "integrate",
+      "fr_refs": [
+        "FR-2",
+        "FR-5"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-RULE-LAZY-EXTRACTION-TRIGGER",
+        "CAP-BE-RULE-MEMORY-INJECTION-ON-TURN",
+        "CAP-BE-CONST-SYNCHRONOUS-INJECTION"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#constraints[id=synchronous-injection]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]"
+      ],
+      "depends": [
+        "TASK-BE-1.2"
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T13:11:37.923Z"
+    },
+    {
+      "id": "TASK-BE-1.4",
+      "title": "验证 extraction-to-injection 端到端管道：从懒提取到冲突更新到检索注入",
+      "description": "端到端集成验证：当新 session 的 beforeTurn 触发时，系统完成完整管道——检查前一 session 是否未提取、异步调用 LLM 提取记忆、对同 subject+type 的已有记忆执行 upsert 而非重复插入、通过三维评分检索相关记忆、将 top-N 记忆注入到对话上下文中。验证管道各阶段的数据流转正确性和端到端行为。",
+      "acceptance_criteria": [
+        "给定前一 session 有未提取的对话历史，beforeTurn 触发后，LLM 提取服务被异步调用且不阻塞 memory injection 的同步返回",
+        "提取完成后，memories 表中新增与 LLM 返回数组数量一致的记忆条目（无同 subject+type 冲突时）",
+        "当提取出的新记忆与已有记忆 subject 和 type 均相同时，已有条目的 content、confidence、importance、updated_at 被更新，id 和 created_at 保持不变",
+        "当提取出的新记忆与已有记忆 subject 相同但 type 不同时，新记忆作为独立条目插入而非覆盖已有条目",
+        "beforeTurn 同步返回的 injected_memories 列表按三维评分降序排列，数量不超过 memory_injection_limit（默认 10）",
+        "三维评分使用默认权重 a=0.3, b=0.5, c=0.2, lambda=0.01 计算，评分值 = 0.3*recency + 0.5*relevance + 0.2*importance",
+        "被注入的记忆条目的 access_count 增加 1，last_accessed_at 更新为当前时间戳",
+        "前一 session 已被标记为已提取时，再次触发 beforeTurn 不会重复调用 LLM 提取",
+        "无前一 session（previous_session_key 为 null）时，跳过提取步骤，仅执行记忆注入",
+        "无相关记忆匹配时，injected_memories 返回空数组，对话正常进行"
+      ],
+      "bdd_scenarios": [
+        {
+          "type": "integration",
+          "name": "新 session 启动时完成懒提取并注入记忆",
+          "given": [
+            "前一 session 存在未提取的对话历史",
+            "数据库中已有若干记忆条目"
+          ],
+          "when": "beforeTurn 被调用，传入当前对话上下文和前一 session key",
+          "then": [
+            "同步返回的 injected_memories 非空且按评分降序排列",
+            "异步提取完成后数据库中新增了从前一 session 提取的记忆条目"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "冲突记忆被更新而非重复插入",
+          "given": [
+            "数据库中已有 subject='user-lang' type='preference' 的记忆",
+            "前一 session 对话中包含与 user-lang 相关的新偏好信息"
+          ],
+          "when": "beforeTurn 触发懒提取完成后",
+          "then": [
+            "数据库中 subject='user-lang' type='preference' 的记忆仅有 1 条",
+            "该条目的 content 已更新为新提取的内容"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "LLM 提取失败时记忆注入正常工作",
+          "given": [
+            "前一 session 存在未提取的对话历史",
+            "LLM 提取服务返回错误",
+            "数据库中已有可匹配的记忆条目"
+          ],
+          "when": "beforeTurn 被调用",
+          "then": [
+            "同步返回的 injected_memories 包含已有的相关记忆",
+            "不抛出异常，对话正常继续"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "无前一 session 时仅执行注入",
+          "given": [
+            "previous_session_key 为 null",
+            "数据库中已有若干记忆条目"
+          ],
+          "when": "beforeTurn 被调用，传入当前对话上下文",
+          "then": [
+            "不触发 LLM 提取调用",
+            "同步返回的 injected_memories 包含与上下文相关的已有记忆"
+          ]
+        },
+        {
+          "type": "integration",
+          "name": "检索后访问计数和时间戳被更新",
+          "given": [
+            "数据库中已有记忆条目 A，access_count=3"
+          ],
+          "when": "beforeTurn 被调用且记忆 A 被包含在 injected_memories 中",
+          "then": [
+            "记忆 A 的 access_count 变为 4",
+            "记忆 A 的 last_accessed_at 不早于调用时间"
+          ]
+        }
+      ],
+      "scope": [
+        "beforeTurn hook 完整管道集成验证",
+        "懒提取触发条件检查",
+        "LLM 提取 → 冲突检测 → 存储的数据流",
+        "三维检索 → 注入的数据流",
+        "访问追踪副作用",
+        "LLM 失败时的静默降级"
+      ],
+      "out_of_scope": [
+        "reflection 相关流程（afterTask / beforeSpawn）",
+        "BM25 索引内部实现细节",
+        "LLM prompt 内容优化",
+        "token 预算截断逻辑"
+      ],
+      "story_id": "STORY-MEMORY-RETRIEVAL",
+      "task_role": "verify",
+      "fr_refs": [
+        "FR-2",
+        "FR-3",
+        "FR-4",
+        "FR-5"
+      ],
+      "capability_refs": [
+        "CAP-BE-API-HOOK-BEFORE-TURN",
+        "CAP-BE-ALGO-TRI-DIMENSIONAL-RETRIEVAL",
+        "CAP-BE-ALGO-MEMORY-CONFLICT-DETECTION",
+        "CAP-BE-CONST-SILENT-DEGRADATION"
+      ],
+      "design_ref": [
+        "docs/design/backend.json#algorithms[id=memory-conflict-detection]",
+        "docs/design/backend.json#algorithms[id=tri-dimensional-retrieval]",
+        "docs/design/backend.json#business_rules[id=lazy-extraction-trigger]",
+        "docs/design/backend.json#business_rules[id=memory-injection-on-turn]",
+        "docs/design/backend.json#constraints[id=silent-degradation]",
+        "docs/design/backend.json#endpoints[id=hook-before-turn]",
+        "docs/design/backend.json#seed_data"
+      ],
+      "depends": [
+        "TASK-BE-1.3",
+        "TASK-BE-1.1",
+        "TASK-BE-1.2"
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T13:22:26.149Z"
+    }
+  ]
+}

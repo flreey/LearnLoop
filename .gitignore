@@ -1,0 +1,8 @@
+
+# Auto-added by agile-dev-agent
+node_modules/
+dist/
+.serena/
+package-lock.json
+loop.log
+.claude/
