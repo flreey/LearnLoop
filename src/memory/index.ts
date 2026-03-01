@@ -1,13 +1,21 @@
 /**
  * Memory extraction, conflict detection, retrieval, and injection.
- * Implements: extractMemories, detectAndUpsert, lazyExtractionCheck
+ * Implements: extractMemories, detectAndUpsert, lazyExtractionCheck,
+ *             retrieveMemories, injectMemories
  */
 
 import { randomUUID } from 'crypto';
 import type { DB } from '../storage/db.js';
 import type { StorageFacade } from '../storage/facade.js';
-import { getMemoriesBySubject, getSessionStateByKey } from '../storage/repository.js';
-import type { MemoryEntry, MemoryType, Message, SessionState } from '../types/index.js';
+import { getMemoriesBySubject, getSessionStateByKey, updateMemory } from '../storage/repository.js';
+import type {
+  MemoryEntry,
+  MemoryType,
+  Message,
+  RetrievalWeights,
+  ScoredMemoryEntry,
+  SessionState,
+} from '../types/index.js';
 import { callLLM, type RawMemoryEntry } from '../llm/index.js';
 
 // ---------------------------------------------------------------------------
@@ -219,4 +227,170 @@ export async function extractMemories(
   }
 
   return { extracted, conflicts_resolved: conflictsResolved };
+}
+
+// ---------------------------------------------------------------------------
+// Tri-Dimensional Memory Retrieval
+// ---------------------------------------------------------------------------
+
+/**
+ * Default retrieval configuration matching design spec seed data.
+ */
+const DEFAULT_WEIGHTS: RetrievalWeights = {
+  recency: 0.3,
+  relevance: 0.5,
+  importance: 0.2,
+};
+const DEFAULT_DECAY_LAMBDA = 0.01;
+
+export interface RetrievalResult {
+  memories: ScoredMemoryEntry[];
+}
+
+/**
+ * Compute exponential recency score.
+ * recency = exp(-lambda * hours_since_last_access)
+ * Falls back to updated_at when last_accessed_at is null.
+ */
+function computeRecency(memory: MemoryEntry, lambda: number, now: Date): number {
+  const referenceTime = memory.last_accessed_at ?? memory.updated_at;
+  const referenceMs = new Date(referenceTime).getTime();
+  const hoursSince = (now.getTime() - referenceMs) / (1000 * 60 * 60);
+  return Math.exp(-lambda * Math.max(0, hoursSince));
+}
+
+/**
+ * Normalize BM25 raw scores from MiniSearch to [0, 1] range.
+ * MiniSearch scores have no fixed upper bound; we divide by the maximum score.
+ * If max score is 0 (no results), returns empty map.
+ */
+function normalizeRelevanceScores(
+  searchResults: Array<{ id: string; score: number }>,
+): Map<string, number> {
+  if (searchResults.length === 0) return new Map();
+
+  const maxScore = Math.max(...searchResults.map(r => r.score));
+  const normalized = new Map<string, number>();
+
+  for (const r of searchResults) {
+    normalized.set(r.id, maxScore > 0 ? r.score / maxScore : 0);
+  }
+
+  return normalized;
+}
+
+/**
+ * Tri-dimensional memory retrieval combining:
+ *   score = a * recency + b * relevance + c * importance
+ *
+ * Only memories with BM25 matches are returned (relevance > 0 required).
+ * After returning top-N memories, updates access_count and last_accessed_at.
+ *
+ * @param db        SQLite database handle
+ * @param facade    StorageFacade for index access (provides BM25 search)
+ * @param query     Search query string
+ * @param limit     Maximum number of memories to return
+ * @param weights   Optional custom weights (overrides defaults)
+ * @param lambda    Optional time decay lambda (overrides default 0.01)
+ */
+export async function retrieveMemories(
+  db: DB,
+  facade: StorageFacade,
+  query: string,
+  limit: number,
+  weights?: Partial<RetrievalWeights>,
+  lambda?: number,
+): Promise<RetrievalResult> {
+  const w: RetrievalWeights = {
+    recency: weights?.recency ?? DEFAULT_WEIGHTS.recency,
+    relevance: weights?.relevance ?? DEFAULT_WEIGHTS.relevance,
+    importance: weights?.importance ?? DEFAULT_WEIGHTS.importance,
+  };
+  const decayLambda = lambda ?? DEFAULT_DECAY_LAMBDA;
+
+  // Step 1: BM25 search — only consider memories with relevance matches
+  const searchResults = facade.searchMemories(query);
+
+  if (searchResults.length === 0) {
+    return { memories: [] };
+  }
+
+  // Step 2: Normalize relevance scores to [0, 1]
+  const relevanceMap = normalizeRelevanceScores(searchResults);
+
+  // Step 3: Load full memory entries for matched IDs
+  const matchedIds = new Set(searchResults.map(r => r.id));
+  const allMemories = db
+    .prepare('SELECT * FROM memories WHERE id IN (' + [...matchedIds].map(() => '?').join(',') + ')')
+    .all([...matchedIds]) as MemoryEntry[];
+
+  if (allMemories.length === 0) {
+    return { memories: [] };
+  }
+
+  // Step 4: Compute scores
+  const now = new Date();
+  const scored: ScoredMemoryEntry[] = allMemories.map(mem => {
+    const recency = computeRecency(mem, decayLambda, now);
+    const relevance = relevanceMap.get(mem.id) ?? 0;
+    const importance = mem.importance;
+    const score = w.recency * recency + w.relevance * relevance + w.importance * importance;
+
+    return { ...mem, score };
+  });
+
+  // Step 5: Sort descending by score
+  scored.sort((a, b) => b.score - a.score);
+
+  // Step 6: Take top-N
+  const topN = scored.slice(0, limit);
+
+  // Step 7: Update access tracking for returned memories
+  const accessedAt = new Date().toISOString();
+  for (const mem of topN) {
+    updateMemory(db, mem.id, {
+      access_count: mem.access_count + 1,
+      last_accessed_at: accessedAt,
+    });
+  }
+
+  return { memories: topN };
+}
+
+// ---------------------------------------------------------------------------
+// Memory Context Injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Retrieve relevant memories and inject them into the context string.
+ *
+ * - Executes tri-dimensional retrieval with context as query
+ * - If no memories found, returns context unchanged (skip_if_empty)
+ * - Otherwise prepends a formatted memory block to the context
+ */
+export async function injectMemories(
+  db: DB,
+  facade: StorageFacade,
+  context: string,
+  limit: number,
+  weights?: Partial<RetrievalWeights>,
+): Promise<string> {
+  const result = await retrieveMemories(db, facade, context, limit, weights);
+
+  if (result.memories.length === 0) {
+    return context;
+  }
+
+  // Format memory block
+  const memoryLines = result.memories.map((mem, idx) => {
+    return `[${idx + 1}] (${mem.type}) ${mem.subject}: ${mem.content}`;
+  });
+
+  const memoryBlock = [
+    '--- Relevant Memories ---',
+    ...memoryLines,
+    '--- End of Memories ---',
+  ].join('\n');
+
+  return `${memoryBlock}\n\n${context}`;
 }

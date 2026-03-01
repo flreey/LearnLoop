@@ -48,6 +48,16 @@ export class StorageFacade {
     this.engine.removeMemory(id);
   }
 
+  // ---- Search operations --------------------------------------------------
+
+  searchMemories(query: string): Array<{ id: string; score: number }> {
+    return this.engine.searchMemories(query);
+  }
+
+  searchReflections(query: string): Array<{ id: string; score: number }> {
+    return this.engine.searchReflections(query);
+  }
+
   // ---- Reflection operations ----------------------------------------------
 
   addReflection(reflection: ReflectionEntry): void {
