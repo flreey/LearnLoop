@@ -757,20 +757,25 @@ describe('handleAfterTask - non-blocking execution (AC8)', () => {
     return result;
   });
 
-  it('hook resolves BEFORE generateReflection completes — truly fire-and-forget (AC8)', async () => {
-    // Simulate a slow LLM call (500ms delay)
+  it('hook resolves AFTER generateReflection completes but BEFORE DB write completes (AC8)', async () => {
+    // The hook awaits LLM but fires DB write as fire-and-forget.
+    // AC8: "hook 返回后主流程不等待反思写入完成" (write is non-blocking, not LLM)
     let generateResolved = false;
     vi.spyOn(reflectionModule, 'generateReflection').mockImplementation(
       () => new Promise(resolve => {
         setTimeout(() => {
           generateResolved = true;
-          resolve(null);
-        }, 500);
+          resolve({
+            task_type: 'code',
+            task_summary: 'Task',
+            outcome: 'success',
+            reflection: 'Done.',
+            lessons: [],
+          });
+        }, 50);
       }),
     );
 
-    // Call the hook and immediately check if it resolves before the LLM does
-    let hookReturnedBeforeLlm = false;
     const hookPromise = handleAfterTask(db, facade, {
       session_key: 'session-001',
       task_type: 'code',
@@ -780,17 +785,19 @@ describe('handleAfterTask - non-blocking execution (AC8)', () => {
       agent_id: null,
     });
 
-    // The hook promise should already be resolved (or resolve immediately on next tick)
-    // before the 500ms LLM delay expires
-    await hookPromise;
+    // Hook awaits LLM — generateReflection must resolve before hook resolves
+    const result = await hookPromise;
 
-    // At this point, generateReflection should NOT have resolved yet (it takes 500ms)
-    hookReturnedBeforeLlm = !generateResolved;
-    expect(hookReturnedBeforeLlm).toBe(true);
-
-    // Wait for the background LLM to finish to avoid unhandled promise warnings
-    await new Promise(r => setTimeout(r, 550));
+    // Hook resolves AFTER generateReflection (awaited)
     expect(generateResolved).toBe(true);
+    // Hook returns non-null values since LLM succeeded
+    expect(result.reflection_id).not.toBeNull();
+    expect(result.outcome).toBe('success');
+
+    // DB write is fire-and-forget — wait for it to complete
+    await new Promise(r => setTimeout(r, 100));
+    const entry = getReflectionById(db, result.reflection_id!);
+    expect(entry).not.toBeNull();
   });
 
   it('caller can fire-and-forget without awaiting — task flow not blocked (AC8)', async () => {
@@ -925,5 +932,477 @@ describe('handleAfterTask - BDD Scenario 2: silent degradation when LLM unavaila
     // No record in DB
     const rows = db.prepare('SELECT COUNT(*) as cnt FROM reflections').get() as { cnt: number };
     expect(rows.cnt).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 (BDD Scenario 1): Hook returns non-null reflection_id and outcome on success
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - BDD Scenario 1: returns reflection_id and outcome (AC1)', () => {
+  it('returns non-null reflection_id when LLM generates a reflection successfully (AC1, BDD1)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: '实现登录功能',
+      outcome: 'success',
+      reflection: 'Login feature implemented with JWT tokens.',
+      lessons: ['Use JWT for stateless auth'],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-bdd1-id',
+      task_type: 'code',
+      task_summary: '实现登录功能',
+      conversation_history: makeConversationHistory(),
+      signals: { user_feedback: 'thanks', review_result: 'PASS', was_respawned: false, timed_out: false },
+      agent_id: null,
+    });
+
+    // Wait for async DB write
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(result.reflection_id).not.toBeNull();
+    expect(typeof result.reflection_id).toBe('string');
+    expect(result.reflection_id!.length).toBeGreaterThan(0);
+  });
+
+  it('returns outcome=success when positive signals present (AC1, AC2, BDD1)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: '实现登录功能',
+      outcome: 'success',
+      reflection: 'Login feature implemented.',
+      lessons: [],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-bdd1-outcome',
+      task_type: 'code',
+      task_summary: '实现登录功能',
+      conversation_history: makeConversationHistory(),
+      signals: { user_feedback: '谢谢', review_result: null, was_respawned: false, timed_out: false },
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(result.outcome).toBe('success');
+  });
+
+  it('returned reflection_id matches DB record (AC1, AC7, BDD1)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: '实现登录功能',
+      outcome: 'success',
+      reflection: 'Login feature implemented.',
+      lessons: ['Write tests first'],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-bdd1-match',
+      task_type: 'code',
+      task_summary: '实现登录功能',
+      conversation_history: makeConversationHistory(),
+      signals: { user_feedback: 'thanks', review_result: 'PASS', was_respawned: false, timed_out: false },
+      agent_id: null,
+    });
+
+    // Wait for async DB write
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(result.reflection_id).not.toBeNull();
+
+    // AC7: retrieve from DB using the returned reflection_id
+    const storedEntry = getReflectionById(db, result.reflection_id!);
+    expect(storedEntry).not.toBeNull();
+    expect(storedEntry!.id).toBe(result.reflection_id);
+    expect(storedEntry!.task_type).toBe('code');
+    expect(storedEntry!.outcome).toBe('success');
+    expect(storedEntry!.task_summary).toBe('实现登录功能');
+    expect(storedEntry!.reflection).toBe('Login feature implemented.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC3 + AC7: End-to-end DB retrieval by returned reflection_id (BDD Scenario 1)
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC7: retrieve reflection by hook-returned reflection_id', () => {
+  it('DB entry for returned reflection_id contains all required fields (AC7)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: '实现用户注册',
+      outcome: 'success',
+      reflection: 'Registration was implemented with email validation.',
+      lessons: ['Always validate email', 'Hash passwords with bcrypt'],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac7',
+      task_type: 'code',
+      task_summary: '实现用户注册',
+      conversation_history: makeConversationHistory(),
+      signals: { user_feedback: '谢谢', review_result: null, was_respawned: false, timed_out: false },
+      agent_id: 'agent-ac7',
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(result.reflection_id).not.toBeNull();
+
+    const entry = getReflectionById(db, result.reflection_id!);
+    expect(entry).not.toBeNull();
+
+    // Verify all required fields per AC7
+    expect(entry!.task_type).toBe('code');
+    expect(entry!.task_summary).toBe('实现用户注册');
+    expect(entry!.outcome).toBe('success');
+    expect(typeof entry!.reflection).toBe('string');
+    expect(entry!.reflection.length).toBeGreaterThan(0);
+
+    const lessonsArr = JSON.parse(entry!.lessons);
+    expect(Array.isArray(lessonsArr)).toBe(true);
+    expect(lessonsArr.length).toBe(2);
+  });
+
+  it('outcome from hook matches outcome in DB entry (AC7)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: 'Deploy to prod',
+      outcome: 'failure',
+      reflection: 'Deployment failed due to config issues.',
+      lessons: ['Validate config before deploy'],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac7-outcome',
+      task_type: 'code',
+      task_summary: 'Deploy to prod',
+      conversation_history: [],
+      signals: { user_feedback: null, review_result: null, was_respawned: true, timed_out: true },
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(result.reflection_id).not.toBeNull();
+    expect(result.outcome).toBe('failure');
+
+    const entry = getReflectionById(db, result.reflection_id!);
+    expect(entry).not.toBeNull();
+    expect(entry!.outcome).toBe('failure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC2: outcome=success when user_feedback='谢谢' and no negative signals
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC2: outcome=success for positive-only signals', () => {
+  it('returns outcome=success for user_feedback=谢谢 with no negative signals (AC2)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: 'Task',
+      outcome: 'success',
+      reflection: 'Done.',
+      lessons: [],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac2',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: { user_feedback: '谢谢', review_result: null, was_respawned: false, timed_out: false },
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+    expect(result.outcome).toBe('success');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC3: outcome=failure when was_respawned=true and no positive signals
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC3: outcome=failure for was_respawned=true only', () => {
+  it('returns outcome=failure when was_respawned=true and no positive signals (AC3)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: 'Task',
+      outcome: 'failure',
+      reflection: 'Task was respawned.',
+      lessons: [],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac3',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: { user_feedback: null, review_result: null, was_respawned: true, timed_out: false },
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+    expect(result.outcome).toBe('failure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC4: outcome=partial when timed_out=true AND review_result='PASS' (mixed signals)
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC4: outcome=partial for mixed signals (BDD Scenario 4)', () => {
+  it('returns outcome=partial when timed_out=true and review_result=PASS (AC4, BDD4)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: 'Task',
+      outcome: 'partial',
+      reflection: 'Partial completion.',
+      lessons: [],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac4',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: { user_feedback: null, review_result: 'PASS', was_respawned: false, timed_out: true },
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+    expect(result.outcome).toBe('partial');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC5: outcome=partial when all signals are null/false (ambiguous)
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC5: outcome=partial when all signals null/false', () => {
+  it('returns outcome=partial when all signals are null/false (AC5)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: 'Task',
+      outcome: 'partial',
+      reflection: 'Ambiguous outcome.',
+      lessons: [],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac5',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: makeAllEmptySignals(),
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+    expect(result.outcome).toBe('partial');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC6: outcome=failure when user_feedback='不对' AND review_result='FAIL' (multiple negatives)
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC6: outcome=failure for multiple negative signals', () => {
+  it('returns outcome=failure when user_feedback=不对 and review_result=FAIL (AC6)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: 'Task',
+      outcome: 'failure',
+      reflection: 'Multiple failure signals.',
+      lessons: [],
+    });
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac6',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: { user_feedback: '不对', review_result: 'FAIL', was_respawned: false, timed_out: false },
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+    expect(result.outcome).toBe('failure');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC8: Non-blocking — DB write completes after hook returns (fire-and-forget write)
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC8: DB write is non-blocking (write is fire-and-forget)', () => {
+  it('DB write completes asynchronously after hook already returned (AC8)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue({
+      task_type: 'code',
+      task_summary: 'Task',
+      outcome: 'success',
+      reflection: 'Done.',
+      lessons: [],
+    });
+
+    // Hook awaits LLM but DB write is fire-and-forget
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac8',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: makeSuccessSignals(),
+      agent_id: null,
+    });
+
+    // Hook has returned — reflection_id is available
+    expect(result.reflection_id).not.toBeNull();
+    expect(result.outcome).toBe('success');
+
+    // DB write may or may not be complete yet (fire-and-forget)
+    // Wait a moment to let it complete
+    await new Promise(r => setTimeout(r, 100));
+
+    // DB write should eventually complete
+    const entry = getReflectionById(db, result.reflection_id!);
+    expect(entry).not.toBeNull();
+  });
+
+  it('hook returns a Promise (async interface, AC8)', () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockResolvedValue(null);
+
+    const promise = handleAfterTask(db, facade, {
+      session_key: 'session-ac8-promise',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: makeSuccessSignals(),
+      agent_id: null,
+    });
+
+    expect(promise).toBeInstanceOf(Promise);
+    return promise;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC9: LLM failure → reflection_id=null, outcome=null, no exception
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC9: LLM failure returns null without throwing', () => {
+  it('returns reflection_id=null when LLM fails with error (AC9)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockRejectedValue(new Error('LLM down'));
+
+    const result = await handleAfterTask(db, facade, {
+      session_key: 'session-ac9',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: makeSuccessSignals(),
+      agent_id: null,
+    });
+
+    expect(result.reflection_id).toBeNull();
+    expect(result.outcome).toBeNull();
+  });
+
+  it('does not throw when LLM fails (AC9)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockRejectedValue(new Error('Network error'));
+
+    let threw = false;
+    try {
+      await handleAfterTask(db, facade, {
+        session_key: 'session-ac9-throw',
+        task_type: 'code',
+        task_summary: 'Task',
+        conversation_history: [],
+        signals: makeSuccessSignals(),
+        agent_id: null,
+      });
+    } catch {
+      threw = true;
+    }
+
+    expect(threw).toBe(false);
+  });
+
+  it('no DB entry when LLM fails (AC9)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockRejectedValue(new Error('LLM error'));
+
+    await handleAfterTask(db, facade, {
+      session_key: 'session-ac9-nodb',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: makeSuccessSignals(),
+      agent_id: null,
+    });
+
+    await new Promise(r => setTimeout(r, 100));
+
+    const row = db.prepare('SELECT COUNT(*) as cnt FROM reflections').get() as { cnt: number };
+    expect(row.cnt).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC10: LLM failure → error is logged (not swallowed silently without trace)
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - AC10: LLM failure is logged', () => {
+  it('logs error to console.error when LLM call fails (AC10)', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const llmError = new Error('LLM service unavailable');
+    vi.spyOn(reflectionModule, 'generateReflection').mockRejectedValue(llmError);
+
+    await handleAfterTask(db, facade, {
+      session_key: 'session-ac10',
+      task_type: 'code',
+      task_summary: 'Task',
+      conversation_history: [],
+      signals: makeSuccessSignals(),
+      agent_id: null,
+    });
+
+    expect(consoleSpy).toHaveBeenCalled();
+    consoleSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BDD Scenario 3: LLM fails → silent degradation end-to-end (integration)
+// ---------------------------------------------------------------------------
+
+describe('handleAfterTask - BDD Scenario 3: LLM failure silent degradation', () => {
+  it('returns null reflection_id, no exception, no DB entry when LLM proxy returns error (BDD3)', async () => {
+    vi.spyOn(reflectionModule, 'generateReflection').mockRejectedValue(new Error('503 Service Unavailable'));
+
+    let threw = false;
+    let result: { reflection_id: string | null; outcome: string | null } | undefined;
+
+    try {
+      result = await handleAfterTask(db, facade, {
+        session_key: 'session-bdd3',
+        task_type: 'code',
+        task_summary: 'Some task',
+        conversation_history: makeConversationHistory(),
+        signals: { user_feedback: 'thanks', review_result: 'PASS', was_respawned: false, timed_out: false },
+        agent_id: null,
+      });
+    } catch {
+      threw = true;
+    }
+
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(threw).toBe(false);
+    expect(result).toBeDefined();
+    expect(result!.reflection_id).toBeNull();
+
+    const row = db.prepare('SELECT COUNT(*) as cnt FROM reflections').get() as { cnt: number };
+    expect(row.cnt).toBe(0);
   });
 });

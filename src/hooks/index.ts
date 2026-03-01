@@ -10,7 +10,7 @@ import type { StorageFacade } from '../storage/facade.js';
 import { lazyExtractionCheck, extractMemories, retrieveMemories } from '../memory/index.js';
 import { insertSessionState, updateSessionState } from '../storage/repository.js';
 import { getConfig } from '../config/index.js';
-import { generateReflection, retrieveReflections } from '../reflection/index.js';
+import { generateReflection, retrieveReflections, resolveOutcome } from '../reflection/index.js';
 import type { MemoryEntry, Message, TaskSignals, ReflectionEntry, ScoredReflectionEntry } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
@@ -155,61 +155,78 @@ export async function handleBeforeTurn(
  *
  * Responsibilities:
  *   1. Resolve task completion signals into a single outcome via resolveOutcome().
- *   2. Invoke generateReflection() asynchronously (fire-and-forget) to generate
- *      a structured reflection entry via LLM.
- *   3. Persist the generated reflection to the SQLite reflections table.
- *   4. Return reflection_id and outcome immediately (non-blocking).
- *      On LLM failure, return reflection_id=null, outcome=null.
+ *   2. Await generateReflection() to generate a structured reflection entry via LLM.
+ *   3. On LLM success: generate a UUID, fire-and-forget the SQLite persistence,
+ *      and return { reflection_id, outcome } immediately (DB write is non-blocking).
+ *   4. On LLM failure: log the error and return { reflection_id: null, outcome: null }.
+ *      Never re-throw.
+ *
+ * AC8: "hook 返回后主流程不等待反思写入完成" — the DB write is fire-and-forget.
+ *      The hook awaits the LLM call (to obtain reflection_id) but not the DB write.
+ * AC9/AC10: On LLM failure, log to console.error and return null sentinel.
  *
  * Design refs:
  *   - endpoints[hook-after-task]
  *   - business_rules[reflection-generation-on-task-complete]
- *   - constraints[non-blocking-reflection]
  *   - constraints[silent-degradation]
  */
-export function handleAfterTask(
+export async function handleAfterTask(
   _db: DB,
   facade: StorageFacade,
   input: AfterTaskInput,
 ): Promise<AfterTaskResult> {
-  // Fire-and-forget: launch reflection generation asynchronously and return
-  // { reflection_id: null, outcome: null } immediately to the caller.
-  // The caller is never blocked by LLM or persistence latency.
-  // See constraints[non-blocking-reflection].
+  // Step 1: Resolve outcome from signals synchronously
+  const outcome = resolveOutcome(input.signals);
 
-  // Non-awaited inner async task — runs concurrently, result is discarded
-  generateReflection(
-    input.task_type,
-    input.task_summary,
-    input.conversation_history,
-    input.signals,
-  ).then((raw) => {
-    if (raw === null) return;
+  // Step 2: Await LLM call — needed to determine if reflection was generated
+  //         and to obtain the reflection content for DB persistence.
+  let raw: Awaited<ReturnType<typeof generateReflection>>;
+  try {
+    raw = await generateReflection(
+      input.task_type,
+      input.task_summary,
+      input.conversation_history,
+      input.signals,
+    );
+  } catch (err) {
+    // AC9/AC10: Log the error, return null sentinel, never re-throw
+    console.error('[LearnLoop] afterTask: reflection generation failed', err);
+    return { reflection_id: null, outcome: null };
+  }
 
-    // Persist the generated reflection to SQLite
-    const id = randomUUID();
-    const now = new Date().toISOString();
+  if (raw === null) {
+    // LLM returned null (e.g., no API key, parse failure) — silent degradation
+    return { reflection_id: null, outcome: null };
+  }
 
-    const entry: ReflectionEntry = {
-      id,
-      task_type: raw.task_type,
-      task_summary: raw.task_summary,
-      outcome: raw.outcome,
-      signals: JSON.stringify(input.signals),
-      reflection: raw.reflection,
-      lessons: JSON.stringify(raw.lessons),
-      agent_id: input.agent_id,
-      source_session: input.session_key,
-      created_at: now,
-    };
+  // Step 3: Generate reflection_id before firing DB write
+  const id = randomUUID();
+  const now = new Date().toISOString();
 
+  const entry: ReflectionEntry = {
+    id,
+    task_type: raw.task_type,
+    task_summary: raw.task_summary,
+    outcome: raw.outcome,
+    signals: JSON.stringify(input.signals),
+    reflection: raw.reflection,
+    lessons: JSON.stringify(raw.lessons),
+    agent_id: input.agent_id,
+    source_session: input.session_key,
+    created_at: now,
+  };
+
+  // Step 4: Fire DB write asynchronously — non-blocking (AC8)
+  // Hook returns reflection_id BEFORE the write completes.
+  Promise.resolve().then(() => {
     facade.addReflection(entry);
-  }).catch(() => {
-    // Silent degradation — swallow all errors, never re-throw
+  }).catch((err) => {
+    // Silent degradation — log but never re-throw
+    console.error('[LearnLoop] afterTask: failed to persist reflection', err);
   });
 
-  // Return immediately with null sentinel — caller is not blocked
-  return Promise.resolve({ reflection_id: null, outcome: null });
+  // Return reflection_id and resolved outcome immediately
+  return { reflection_id: id, outcome };
 }
 
 // ---------------------------------------------------------------------------

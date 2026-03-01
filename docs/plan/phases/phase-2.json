@@ -343,7 +343,9 @@
         "TASK-BE-2.3",
         "TASK-BE-2.1",
         "TASK-BE-2.2"
-      ]
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T13:56:52.636Z"
     },
     {
       "id": "TASK-BE-2.5",
