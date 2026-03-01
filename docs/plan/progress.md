@@ -169,3 +169,12 @@
 **Total Attempts**: 3
 **Files**: docs/plan/index.json, docs/plan/phases/phase-3.json, src/hooks/index.ts, src/index.ts
 
+
+## Iteration 20 - 2026-03-01 14:43:37
+
+**Task**: TASK-BE-3.2 — End-to-end smoke test: full conversation lifecycle from extraction through injection
+**Result**: ✅ completed
+**Steps**: implement: pass (1 attempts, round 2), bdd: pass (1 attempts, round 2)
+**Total Attempts**: 3
+**Files**: docs/plan/index.json, docs/plan/phases/phase-3.json, src/hooks/index.ts
+

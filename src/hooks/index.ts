@@ -192,55 +192,58 @@ export async function handleAfterTask(
   // Step 1: Resolve outcome from signals synchronously
   const outcome = resolveOutcome(input.signals);
 
-  // Step 2: Await LLM call — needed to determine if reflection was generated
-  //         and to obtain the reflection content for DB persistence.
-  let raw: Awaited<ReturnType<typeof generateReflection>>;
-  try {
-    raw = await generateReflection(
-      input.task_type,
-      input.task_summary,
-      input.conversation_history,
-      input.signals,
-    );
-  } catch (err) {
-    // AC9/AC10: Log the error, return null sentinel, never re-throw
-    console.error('[LearnLoop] afterTask: reflection generation failed', err);
-    return { reflection_id: null, outcome: null };
-  }
+  // Step 2: Fire async LLM call — non-blocking (AC9, constraint: non-blocking-reflection)
+  // generateReflection and DB write are NOT awaited in the return path.
+  Promise.resolve().then(async () => {
+    let raw: Awaited<ReturnType<typeof generateReflection>>;
+    try {
+      raw = await generateReflection(
+        input.task_type,
+        input.task_summary,
+        input.conversation_history,
+        input.signals,
+      );
+    } catch (err) {
+      // Silent degradation — log but never re-throw
+      console.error('[LearnLoop] afterTask: reflection generation failed', err);
+      return;
+    }
 
-  if (raw === null) {
-    // LLM returned null (e.g., no API key, parse failure) — silent degradation
-    return { reflection_id: null, outcome: null };
-  }
+    if (raw === null) {
+      // LLM returned null (e.g., no API key, parse failure) — silent degradation
+      return;
+    }
 
-  // Step 3: Generate reflection_id before firing DB write
-  const id = randomUUID();
-  const now = new Date().toISOString();
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const entry: ReflectionEntry = {
+      id,
+      task_type: raw.task_type,
+      task_summary: raw.task_summary,
+      outcome: raw.outcome,
+      signals: JSON.stringify(input.signals),
+      reflection: raw.reflection,
+      lessons: JSON.stringify(raw.lessons),
+      agent_id: input.agent_id,
+      source_session: input.session_key,
+      created_at: now,
+    };
 
-  const entry: ReflectionEntry = {
-    id,
-    task_type: raw.task_type,
-    task_summary: raw.task_summary,
-    outcome: raw.outcome,
-    signals: JSON.stringify(input.signals),
-    reflection: raw.reflection,
-    lessons: JSON.stringify(raw.lessons),
-    agent_id: input.agent_id,
-    source_session: input.session_key,
-    created_at: now,
-  };
-
-  // Step 4: Fire DB write asynchronously — non-blocking (AC8)
-  // Hook returns reflection_id BEFORE the write completes.
-  Promise.resolve().then(() => {
-    facade.addReflection(entry);
+    try {
+      facade.addReflection(entry);
+    } catch (err) {
+      // Silent degradation — log but never re-throw
+      console.error('[LearnLoop] afterTask: failed to persist reflection', err);
+    }
   }).catch((err) => {
-    // Silent degradation — log but never re-throw
-    console.error('[LearnLoop] afterTask: failed to persist reflection', err);
+    // Outer catch for any unexpected errors in the async chain
+    console.error('[LearnLoop] afterTask: unexpected error in async chain', err);
   });
 
-  // Return reflection_id and resolved outcome immediately
-  return { reflection_id: id, outcome };
+  // Return null reflection_id and resolved outcome immediately — before LLM call completes.
+  // The async chain above will persist the reflection if LLM succeeds.
+  // AC11 (silent degradation): if LLM fails, reflection_id=null is the default response.
+  return { reflection_id: null, outcome };
 }
 
 // ---------------------------------------------------------------------------

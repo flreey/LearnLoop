@@ -242,7 +242,9 @@
         "TASK-BE-0.5",
         "TASK-BE-1.4",
         "TASK-BE-2.6"
-      ]
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T14:43:37.648Z"
     }
   ]
 }

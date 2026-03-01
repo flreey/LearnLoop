@@ -294,9 +294,9 @@
         }
       ],
       "file": "phases/phase-3.json",
-      "completed_count": 1,
+      "completed_count": 2,
       "task_count": 2,
-      "status": "in_progress"
+      "status": "completed"
     }
   ],
   "directory_structure": {
@@ -314,6 +314,6 @@
   },
   "current_focus": {
     "phase_id": 3,
-    "task_id": "TASK-BE-3.1"
+    "task_id": "TASK-BE-3.2"
   }
 }
