@@ -11,3 +11,4 @@
 ## Module Resolution & Imports
 
 - tsconfig uses `"module": "Node16"` with `.js` extension in import paths (required for ESM compatibility with Node16 module resolution)
+- `vi.spyOn` on ES module imports requires that the module exports be accessed at call-time (not captured in a local variable); importing the module as `* as moduleName` and spying on `moduleName.exportName` works correctly because the module reference is consistent at spy-time
