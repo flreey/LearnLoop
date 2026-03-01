@@ -99,7 +99,9 @@
       "depends": [
         "TASK-BE-1.4",
         "TASK-BE-2.6"
-      ]
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T14:31:29.122Z"
     },
     {
       "id": "TASK-BE-3.2",

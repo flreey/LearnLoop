@@ -293,7 +293,10 @@
           ]
         }
       ],
-      "file": "phases/phase-3.json"
+      "file": "phases/phase-3.json",
+      "completed_count": 1,
+      "task_count": 2,
+      "status": "in_progress"
     }
   ],
   "directory_structure": {
@@ -310,7 +313,7 @@
     "test/fixtures/": "Test fixtures (sample conversations, mock LLM responses)"
   },
   "current_focus": {
-    "phase_id": 2,
-    "task_id": "TASK-BE-2.6"
+    "phase_id": 3,
+    "task_id": "TASK-BE-3.1"
   }
 }

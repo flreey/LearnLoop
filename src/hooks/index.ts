@@ -75,10 +75,18 @@ export interface BeforeSpawnResult {
  *   - constraints[synchronous-injection]
  *   - endpoints[hook-before-turn]
  */
+export interface RetrievalConfig {
+  recency: number;
+  relevance: number;
+  importance: number;
+  lambda: number;
+}
+
 export async function handleBeforeTurn(
   db: DB,
   facade: StorageFacade,
   input: BeforeTurnInput,
+  retrievalConfig?: RetrievalConfig,
 ): Promise<BeforeTurnResult> {
   const config = getConfig();
   const limit = config.retrieval.memoryInjectionLimit;
@@ -128,11 +136,17 @@ export async function handleBeforeTurn(
   let injectedMemories: MemoryEntry[] = [];
 
   try {
+    const weights = retrievalConfig
+      ? { recency: retrievalConfig.recency, relevance: retrievalConfig.relevance, importance: retrievalConfig.importance }
+      : undefined;
+    const lambda = retrievalConfig?.lambda;
     const retrievalResult = await retrieveMemories(
       db,
       facade,
       input.conversation_context,
       limit,
+      weights,
+      lambda,
     );
     injectedMemories = retrievalResult.memories;
   } catch {
