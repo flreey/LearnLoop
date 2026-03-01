@@ -451,7 +451,7 @@
       ],
       "bdd_scenarios": [
         {
-          "type": "e2e",
+          "type": "api",
           "name": "反思生成后在后续任务中被注入",
           "given": [
             "存储层已初始化",
@@ -465,7 +465,7 @@
           ]
         },
         {
-          "type": "e2e",
+          "type": "api",
           "name": "不同类型任务的反思隔离",
           "given": [
             "存储层已初始化",
@@ -512,7 +512,9 @@
         "TASK-BE-2.1",
         "TASK-BE-2.2",
         "TASK-BE-2.3"
-      ]
+      ],
+      "status": "completed",
+      "completed_at": "2026-03-01T14:22:47.168Z"
     }
   ]
 }
