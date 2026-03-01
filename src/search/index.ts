@@ -45,6 +45,7 @@ interface MemoryDoc {
 
 interface ReflectionDoc {
   id: string;
+  task_type: string;
   task_summary: string;
   reflection: string;
 }
@@ -81,11 +82,11 @@ export class SearchEngine {
 
     this.reflectionIndex = new MiniSearch<ReflectionDoc>({
       idField: 'id',
-      fields: ['task_summary', 'reflection'],
+      fields: ['task_type', 'task_summary', 'reflection'],
       storeFields: [],
       tokenize: cjkTokenize,
       searchOptions: {
-        boost: { task_summary: 2, reflection: 1 },
+        boost: { task_type: 3, task_summary: 2, reflection: 1 },
         fuzzy: 0.2,
         prefix: true,
       },
@@ -143,6 +144,7 @@ export class SearchEngine {
   addReflection(reflection: ReflectionEntry): void {
     const doc: ReflectionDoc = {
       id: reflection.id,
+      task_type: reflection.task_type,
       task_summary: reflection.task_summary,
       reflection: reflection.reflection,
     };
@@ -152,6 +154,7 @@ export class SearchEngine {
   addAllReflections(reflections: ReflectionEntry[]): void {
     const docs: ReflectionDoc[] = reflections.map(r => ({
       id: r.id,
+      task_type: r.task_type,
       task_summary: r.task_summary,
       reflection: r.reflection,
     }));
@@ -161,6 +164,7 @@ export class SearchEngine {
   updateReflection(reflection: ReflectionEntry): void {
     const doc: ReflectionDoc = {
       id: reflection.id,
+      task_type: reflection.task_type,
       task_summary: reflection.task_summary,
       reflection: reflection.reflection,
     };
@@ -219,9 +223,10 @@ export function createSearchEngine(db: DB): SearchEngine {
 
   // Load all reflections from DB
   const reflections = db
-    .prepare('SELECT id, task_summary, reflection FROM reflections')
+    .prepare('SELECT id, task_type, task_summary, reflection FROM reflections')
     .all() as Array<{
     id: string;
+    task_type: string;
     task_summary: string;
     reflection: string;
   }>;
@@ -229,10 +234,10 @@ export function createSearchEngine(db: DB): SearchEngine {
     engine.addAllReflections(
       reflections.map(r => ({
         id: r.id,
+        task_type: r.task_type,
         task_summary: r.task_summary,
         reflection: r.reflection,
         // Minimal required ReflectionEntry fields (unused by search index)
-        task_type: '',
         outcome: 'success' as const,
         signals: '[]',
         lessons: '[]',

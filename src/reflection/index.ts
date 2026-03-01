@@ -1,11 +1,13 @@
 /**
  * Reflection generation, signal resolution, retrieval, and injection.
- * Implements: resolveOutcome(), generateReflection()
+ * Implements: resolveOutcome(), generateReflection(), retrieveReflections()
  */
 
-import type { OutcomeType, TaskSignals, Message } from '../types/index.js';
+import type { OutcomeType, TaskSignals, Message, ScoredReflectionEntry, ReflectionEntry } from '../types/index.js';
 import { callReflectionLLM } from '../llm/index.js';
 import type { RawReflectionEntry } from '../llm/index.js';
+import type { DB } from '../storage/db.js';
+import type { StorageFacade } from '../storage/facade.js';
 
 // ---------------------------------------------------------------------------
 // Signal patterns (from design: seed_data.signal_patterns)
@@ -108,4 +110,80 @@ export async function generateReflection(
     // Silent degradation — never throw
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// retrieveReflections — BM25 retrieval by task_type and task_summary
+// ---------------------------------------------------------------------------
+
+/**
+ * Internal function: BM25 search over reflections by task_type and task_summary.
+ *
+ * Combines task_type and task_summary into a single query string, performs
+ * BM25 search via the SearchEngine, loads full ReflectionEntry records from
+ * the DB for matched IDs, attaches BM25 scores, sorts descending, and slices
+ * to the requested limit.
+ *
+ * Design refs:
+ *   - endpoints[internal-retrieve-reflections]
+ *   - constraints[retrieval-latency]
+ *
+ * @param db       SQLite database handle
+ * @param facade   StorageFacade providing BM25 search access
+ * @param task_type   Task type string for search query
+ * @param task_summary Task summary string for search query
+ * @param limit    Maximum number of results to return
+ * @returns Scored reflection entries sorted by relevance descending
+ */
+export function retrieveReflections(
+  db: DB,
+  facade: StorageFacade,
+  task_type: string,
+  task_summary: string,
+  limit: number,
+): ScoredReflectionEntry[] {
+  // Combine task_type and task_summary into a single BM25 query.
+  // The SearchEngine's reflectionIndex is built on [task_summary, reflection]
+  // fields. We also want to match on task_type. Concatenate both so MiniSearch
+  // will tokenize and score across the full query.
+  const query = `${task_type} ${task_summary}`.trim();
+
+  if (!query) {
+    return [];
+  }
+
+  // BM25 search via the facade (delegates to SearchEngine.searchReflections)
+  const searchResults = facade.searchReflections(query);
+
+  if (searchResults.length === 0) {
+    return [];
+  }
+
+  // Build a score map for O(1) lookup
+  const scoreMap = new Map<string, number>();
+  for (const r of searchResults) {
+    scoreMap.set(r.id, r.score);
+  }
+
+  // Load full ReflectionEntry records from DB for matched IDs
+  const matchedIds = [...scoreMap.keys()];
+  const placeholders = matchedIds.map(() => '?').join(',');
+  const rows = db
+    .prepare(`SELECT * FROM reflections WHERE id IN (${placeholders})`)
+    .all(matchedIds) as ReflectionEntry[];
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  // Attach scores and sort descending
+  const scored: ScoredReflectionEntry[] = rows.map(row => ({
+    ...row,
+    score: scoreMap.get(row.id) ?? 0,
+  }));
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // Apply limit
+  return scored.slice(0, limit);
 }

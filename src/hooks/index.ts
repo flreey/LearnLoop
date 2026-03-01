@@ -10,8 +10,8 @@ import type { StorageFacade } from '../storage/facade.js';
 import { lazyExtractionCheck, extractMemories, retrieveMemories } from '../memory/index.js';
 import { insertSessionState, updateSessionState } from '../storage/repository.js';
 import { getConfig } from '../config/index.js';
-import { generateReflection } from '../reflection/index.js';
-import type { MemoryEntry, Message, TaskSignals, ReflectionEntry } from '../types/index.js';
+import { generateReflection, retrieveReflections } from '../reflection/index.js';
+import type { MemoryEntry, Message, TaskSignals, ReflectionEntry, ScoredReflectionEntry } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +41,17 @@ export interface AfterTaskInput {
 export interface AfterTaskResult {
   reflection_id: string | null;
   outcome: string | null;
+}
+
+export interface BeforeSpawnInput {
+  task_description: string;
+  task_type: string;
+  agent_id: string | null;
+}
+
+export interface BeforeSpawnResult {
+  augmented_task_description: string;
+  injected_reflections: ScoredReflectionEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -199,4 +210,72 @@ export function handleAfterTask(
 
   // Return immediately with null sentinel — caller is not blocked
   return Promise.resolve({ reflection_id: null, outcome: null });
+}
+
+// ---------------------------------------------------------------------------
+// handleBeforeSpawn
+// ---------------------------------------------------------------------------
+
+/**
+ * beforeSpawn hook handler.
+ *
+ * Responsibilities:
+ *   1. Synchronously retrieve relevant reflections via BM25 search using
+ *      task_type and task_description as the query.
+ *   2. If matching reflections found, append them to the task_description.
+ *   3. Return augmented_task_description (original + injected reflections)
+ *      and injected_reflections array.
+ *   4. If no matching reflections, return original task_description unchanged
+ *      and empty injected_reflections array.
+ *
+ * Spawn MUST await this hook before proceeding — injection is synchronous
+ * (retrieval happens within the await, not fire-and-forget).
+ *
+ * Design refs:
+ *   - endpoints[hook-before-spawn]
+ *   - business_rules[reflection-injection-on-spawn]
+ *   - constraints[retrieval-latency]
+ */
+export async function handleBeforeSpawn(
+  db: DB,
+  facade: StorageFacade,
+  input: BeforeSpawnInput,
+): Promise<BeforeSpawnResult> {
+  const config = getConfig();
+  const limit = config.retrieval.reflectionInjectionLimit;
+
+  // Retrieve relevant reflections via BM25 (synchronous — must complete before return)
+  const matchedReflections = retrieveReflections(
+    db,
+    facade,
+    input.task_type,
+    input.task_description,
+    limit,
+  );
+
+  // Skip injection if no matches (skip_if_empty per design spec)
+  if (matchedReflections.length === 0) {
+    return {
+      augmented_task_description: input.task_description,
+      injected_reflections: [],
+    };
+  }
+
+  // Format injected reflection block
+  const reflectionLines = matchedReflections.map((r, idx) => {
+    return `[${idx + 1}] [${r.task_type}] ${r.task_summary} (${r.outcome}): ${r.reflection}`;
+  });
+
+  const reflectionBlock = [
+    '--- Relevant Past Reflections ---',
+    ...reflectionLines,
+    '--- End of Reflections ---',
+  ].join('\n');
+
+  const augmentedDescription = `${input.task_description}\n\n${reflectionBlock}`;
+
+  return {
+    augmented_task_description: augmentedDescription,
+    injected_reflections: matchedReflections,
+  };
 }
