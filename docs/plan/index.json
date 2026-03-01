@@ -231,7 +231,7 @@
         }
       ],
       "file": "phases/phase-2.json",
-      "completed_count": 0,
+      "completed_count": 1,
       "task_count": 6,
       "status": "in_progress"
     },
