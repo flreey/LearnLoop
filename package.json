@@ -1,7 +1,7 @@
 {
   "name": "learnloop",
   "version": "0.1.0",
-  "description": "LearnLoop — OpenClaw Plugin for persistent memory and reflection",
+  "description": "LearnLoop \u2014 OpenClaw Plugin for persistent memory and reflection",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -26,5 +26,10 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "openclaw": {
+    "extensions": [
+      "./src/openclaw-adapter/index.ts"
+    ]
   }
 }

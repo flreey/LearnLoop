@@ -1,0 +1,56 @@
+{
+  "id": "learnloop",
+  "name": "LearnLoop",
+  "description": "Agent Memory & Learning — automatic memory extraction, reflection generation, and context injection for OpenClaw agents",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "Path to SQLite database file. Default: ~/.openclaw/learnloop/learnloop.db"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "LLM API key for memory extraction and reflection generation"
+      },
+      "apiBase": {
+        "type": "string",
+        "description": "LLM API base URL (OpenAI-compatible). Default: https://api.openai.com/v1"
+      },
+      "model": {
+        "type": "string",
+        "description": "LLM model for extraction/reflection. Default: gpt-4o-mini"
+      },
+      "retrieval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "a": {
+            "type": "number",
+            "description": "Recency weight (0-1). Default: 0.3"
+          },
+          "b": {
+            "type": "number",
+            "description": "Relevance weight (0-1). Default: 0.5"
+          },
+          "c": {
+            "type": "number",
+            "description": "Importance weight (0-1). Default: 0.2"
+          },
+          "lambda": {
+            "type": "number",
+            "description": "Exponential time-decay lambda. Default: 0.01"
+          }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "apiKey": { "label": "LLM API Key", "sensitive": true },
+    "apiBase": { "label": "LLM API Base URL", "placeholder": "https://api.openai.com/v1" },
+    "model": { "label": "LLM Model", "placeholder": "gpt-4o-mini" },
+    "dbPath": { "label": "Database Path", "placeholder": "~/.openclaw/learnloop/learnloop.db" }
+  }
+}
