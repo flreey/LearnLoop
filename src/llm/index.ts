@@ -6,6 +6,27 @@
 import type { Message, MemoryType, OutcomeType, TaskSignals } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
+// Utility: strip markdown code fences from LLM response
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip markdown code fences from LLM response content.
+ * Handles:
+ *   - Plain JSON (returned as-is)
+ *   - ```json ... ``` wrapped
+ *   - ``` ... ``` wrapped
+ *   - Content with trailing natural-language text after the fence
+ */
+export function stripCodeFences(content: string): string {
+  const trimmed = content.trim();
+  const match = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (match) {
+    return match[1].trim();
+  }
+  return trimmed;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -22,6 +43,8 @@ export interface RawMemoryEntry {
 // ---------------------------------------------------------------------------
 
 const EXTRACTION_SYSTEM_PROMPT = `You are a memory extraction assistant. Analyze the conversation and extract memorable information.
+
+Return ONLY raw JSON. No markdown code blocks, no explanation, no extra text.
 
 Return a JSON object with a "memories" key containing an array of memory entries. Each entry must have:
 - type: "preference" | "fact" | "entity" | "episode"
@@ -82,7 +105,6 @@ export async function callLLM(history: Message[]): Promise<RawMemoryEntry[]> {
           { role: 'user', content: buildExtractionUserContent(history) },
         ],
         temperature: 0.1,
-        response_format: { type: 'json_object' },
         max_tokens: 1000,
       }),
     });
@@ -125,12 +147,14 @@ function clamp(n: unknown): number {
 /**
  * Parse LLM response content into RawMemoryEntry[].
  * Returns empty array on any parse error.
+ * Handles markdown code fences wrapping JSON.
  */
 export function parseMemoryResponse(content: string): RawMemoryEntry[] {
   try {
+    const stripped = stripCodeFences(content);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(stripped);
     } catch {
       return [];
     }
@@ -191,6 +215,8 @@ export interface RawReflectionEntry {
 // ---------------------------------------------------------------------------
 
 const REFLECTION_SYSTEM_PROMPT = `You are a reflection assistant using Reflexion methodology. Analyze the task context and generate a structured reflection entry.
+
+Return ONLY raw JSON. No markdown code blocks, no explanation, no extra text.
 
 Return a JSON object with these fields:
 - task_type: "code" | "research" | "deployment" (classify the task)
@@ -266,7 +292,6 @@ export async function callReflectionLLM(
           },
         ],
         temperature: 0.3,
-        response_format: { type: 'json_object' },
         max_tokens: 800,
       }),
     });
@@ -302,12 +327,14 @@ function isValidOutcome(o: unknown): o is OutcomeType {
 /**
  * Parse LLM response content into RawReflectionEntry.
  * Returns null on any parse error.
+ * Handles markdown code fences wrapping JSON.
  */
 export function parseReflectionResponse(content: string): RawReflectionEntry | null {
   try {
+    const stripped = stripCodeFences(content);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(stripped);
     } catch {
       return null;
     }
