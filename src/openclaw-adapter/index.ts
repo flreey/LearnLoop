@@ -9,6 +9,12 @@
  *   afterTask   → agent_end           (extract reflections from completed runs)
  *   beforeSpawn → subagent_spawning   (augment task description with reflections)
  *
+ * Optimizations:
+ *   1. Delta extraction: only sends new messages since last extraction (not full history)
+ *   2. Throttling: same session only triggers extraction/reflection once per THROTTLE_MS
+ *   3. Importance-gated reflection: reflection only fires for subagent tasks or when
+ *      accumulated delta >= 6 messages. Memory extraction always runs (cheap).
+ *
  * LLM configuration:
  *   Uses OPENCLAW_API_KEY / OPENCLAW_API_BASE env vars (set by plugin config).
  *   Falls back to OPENAI_API_KEY / default OpenAI base URL.
@@ -17,7 +23,30 @@
 import { createPlugin, type PluginConfig, type OpenClawPlugin } from '../plugin.js';
 import type { Message } from '../types/index.js';
 
-// Track session conversations for reflection extraction
+// ---------------------------------------------------------------------------
+// Cost control constants
+// ---------------------------------------------------------------------------
+
+/** Minimum interval between extraction+reflection per session (ms) */
+const THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Max messages to send to LLM per call */
+const MAX_HISTORY_WINDOW = 10;
+
+// ---------------------------------------------------------------------------
+// Per-session state for delta tracking + throttling
+// ---------------------------------------------------------------------------
+
+interface SessionTrack {
+  /** Index into the full message list: next extraction starts here */
+  lastExtractedIdx: number;
+  /** Timestamp of last extraction run */
+  lastRunAt: number;
+}
+
+const sessionStates = new Map<string, SessionTrack>();
+
+// Track session conversations (kept for subagent_ended which lacks event.messages)
 const sessionConversations = new Map<string, Message[]>();
 
 // LearnLoop plugin instance (lazy init)
@@ -42,11 +71,9 @@ function getPlugin(pluginConfig?: Record<string, unknown>): OpenClawPlugin {
     };
   }
 
-  // Set LLM env vars: plugin config > existing env vars > ANTHROPIC_AUTH_TOKEN fallback
   if (pluginConfig?.apiKey && typeof pluginConfig.apiKey === 'string') {
     process.env['OPENCLAW_API_KEY'] = pluginConfig.apiKey;
   } else if (!process.env['OPENCLAW_API_KEY'] && !process.env['OPENAI_API_KEY']) {
-    // Fallback: use ANTHROPIC_AUTH_TOKEN if no other key is set
     const fallbackKey = process.env['ANTHROPIC_AUTH_TOKEN'] ?? process.env['ANTHROPIC_API_KEY'];
     if (fallbackKey) {
       process.env['OPENCLAW_API_KEY'] = fallbackKey;
@@ -61,6 +88,38 @@ function getPlugin(pluginConfig?: Record<string, unknown>): OpenClawPlugin {
 
   learnloop = createPlugin(config);
   return learnloop;
+}
+
+// ---------------------------------------------------------------------------
+// Shared: extract text from Anthropic-format messages
+// ---------------------------------------------------------------------------
+
+function extractText(msg: any): string | null {
+  if (!msg || typeof msg !== 'object') return null;
+  const role = msg.role;
+  if (role !== 'user' && role !== 'assistant') return null;
+
+  if (typeof msg.content === 'string') return msg.content;
+
+  if (Array.isArray(msg.content)) {
+    const textParts = msg.content
+      .filter((b: any) => b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
+      .map((b: any) => b.text);
+    return textParts.length > 0 ? textParts.join('\n') : null;
+  }
+
+  return null;
+}
+
+function parseHistory(rawMessages: unknown[]): Message[] {
+  const history: Message[] = [];
+  for (const m of rawMessages) {
+    const text = extractText(m);
+    if (text && text.trim()) {
+      history.push({ role: (m as any).role, content: text });
+    }
+  }
+  return history;
 }
 
 // ============================================================================
@@ -80,10 +139,7 @@ const learnloopPlugin = {
     log.info(`learnloop: registered (db: ${plugin.config.dbPath})`);
 
     // ======================================================================
-    // Hook: before_agent_start → beforeTurn
-    //
-    // Triggers lazy extraction of previous session memories and injects
-    // relevant memories into the agent's context as prependContext.
+    // Hook: before_agent_start → beforeTurn (inject memories)
     // ======================================================================
 
     api.on('before_agent_start', async (
@@ -97,19 +153,15 @@ const learnloopPlugin = {
         const result = await plugin.beforeTurn({
           session_key: ctx.sessionKey,
           conversation_context: event.prompt,
-          // OpenClaw doesn't provide previous session info directly;
-          // LearnLoop tracks this internally via session_states table
           previous_session_key: null,
           previous_conversation_history: null,
         });
 
         if (result.injected_memories.length > 0) {
           log.info(`learnloop: injecting ${result.injected_memories.length} memories`);
-
           const memoryBlock = result.injected_memories
             .map(m => `- [${m.type}] ${m.content}`)
             .join('\n');
-
           return {
             prependContext: `\n<learnloop_memories>\nRelevant memories from past sessions:\n${memoryBlock}\n</learnloop_memories>\n`,
           };
@@ -121,9 +173,7 @@ const learnloopPlugin = {
     });
 
     // ======================================================================
-    // Hook: llm_output → track conversation messages
-    //
-    // Collects assistant messages per session for reflection generation.
+    // Hook: llm_output → track conversation (for subagent_ended)
     // ======================================================================
 
     api.on('llm_output', (
@@ -131,19 +181,15 @@ const learnloopPlugin = {
       ctx: { sessionKey?: string },
     ) => {
       if (!ctx.sessionKey) return;
-
       const existing = sessionConversations.get(ctx.sessionKey) || [];
       for (const text of event.assistantTexts) {
-        if (text) {
-          existing.push({ role: 'assistant', content: text });
-        }
+        if (text) existing.push({ role: 'assistant', content: text });
       }
       sessionConversations.set(ctx.sessionKey, existing);
-      log.info(`learnloop: [DBG] llm_output — session=${ctx.sessionKey} totalMsgs=${existing.length}`);
     });
 
     // ======================================================================
-    // Hook: llm_input → track user prompts
+    // Hook: llm_input → track user prompts (for subagent_ended)
     // ======================================================================
 
     api.on('llm_input', (
@@ -151,18 +197,19 @@ const learnloopPlugin = {
       ctx: { sessionKey?: string },
     ) => {
       if (!ctx.sessionKey || !event.prompt) return;
-
       const existing = sessionConversations.get(ctx.sessionKey) || [];
       existing.push({ role: 'user', content: event.prompt });
       sessionConversations.set(ctx.sessionKey, existing);
-      log.info(`learnloop: [DBG] llm_input — session=${ctx.sessionKey} totalMsgs=${existing.length}`);
     });
 
     // ======================================================================
-    // Hook: agent_end → afterTask
+    // Hook: agent_end → memory extraction + conditional reflection
     //
-    // When an agent run completes, generates a reflection from the
-    // conversation history and stores it for future retrieval.
+    // Cost controls:
+    //   1. Throttle: skip if same session ran < 5min ago
+    //   2. Delta: only new messages since last extraction
+    //   3. Window: max 10 messages per LLM call
+    //   4. Reflection gating: only for subagent or delta >= 6
     // ======================================================================
 
     api.on('agent_end', async (
@@ -171,53 +218,61 @@ const learnloopPlugin = {
     ) => {
       if (!ctx.sessionKey) return;
 
-      // Build history from event.messages (agent_end fires BEFORE llm_output).
-      // pi-agent-core messages use Anthropic format where content can be:
-      //   - string (simple text)
-      //   - ContentBlock[] (array of {type:'text', text:string}, {type:'tool_use',...}, etc.)
       const rawMessages = Array.isArray(event.messages) ? event.messages : [];
+      const fullHistory = parseHistory(rawMessages);
 
-      function extractText(msg: any): string | null {
-        if (!msg || typeof msg !== 'object') return null;
-        const role = msg.role;
-        if (role !== 'user' && role !== 'assistant') return null;
+      if (fullHistory.length < 2) return;
 
-        // Case 1: content is a string
-        if (typeof msg.content === 'string') return msg.content;
-
-        // Case 2: content is an array of content blocks
-        if (Array.isArray(msg.content)) {
-          const textParts = msg.content
-            .filter((b: any) => b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
-            .map((b: any) => b.text);
-          return textParts.length > 0 ? textParts.join('\n') : null;
-        }
-
-        return null;
-      }
-
-      const history: Message[] = [];
-      for (const m of rawMessages) {
-        const text = extractText(m);
-        if (text && text.trim()) {
-          history.push({ role: (m as any).role, content: text });
-        }
-      }
-
-      log.info(`learnloop: [DBG] agent_end — session=${ctx.sessionKey} rawMsgs=${rawMessages.length} history=${history.length}`);
-
-      // Only reflect on sessions with meaningful conversation (at least 1 user + 1 assistant)
-      if (history.length < 2) {
-        log.info(`learnloop: [DBG] agent_end SKIPPED — history too short (${history.length})`);
+      // --- Throttle check ---
+      const now = Date.now();
+      const track = sessionStates.get(ctx.sessionKey);
+      if (track && (now - track.lastRunAt) < THROTTLE_MS) {
+        track.lastExtractedIdx = fullHistory.length;
         return;
       }
+
+      // --- Delta: only new messages since last extraction ---
+      const startIdx = track?.lastExtractedIdx ?? 0;
+      const delta = fullHistory.slice(startIdx);
+
+      if (delta.length < 2) {
+        sessionStates.set(ctx.sessionKey, {
+          lastExtractedIdx: fullHistory.length,
+          lastRunAt: track?.lastRunAt ?? 0,
+        });
+        return;
+      }
+
+      const window = delta.slice(-MAX_HISTORY_WINDOW);
+
+      log.info(`learnloop: agent_end — session=${ctx.sessionKey} full=${fullHistory.length} delta=${delta.length} window=${window.length}`);
+
+      // Update state immediately (prevents concurrent duplicate runs)
+      sessionStates.set(ctx.sessionKey, {
+        lastExtractedIdx: fullHistory.length,
+        lastRunAt: now,
+      });
+
+      // --- Always: extract memories (1 LLM call, ~3K tokens) ---
+      try {
+        const memResult = await plugin.extractMemoriesNow(ctx.sessionKey, window);
+        if (memResult.extracted > 0) {
+          log.info(`learnloop: extracted ${memResult.extracted} memories (${memResult.conflicts} conflicts) for ${ctx.sessionKey}`);
+        }
+      } catch (err) {
+        log.warn(`learnloop: memory extraction error: ${String(err)}`);
+      }
+
+      // --- Conditional reflection: subagent always; regular only if delta >= 6 ---
+      const isSubagent = ctx.sessionKey?.includes(':subagent:') ?? false;
+      if (!isSubagent && delta.length < 6) return;
 
       try {
         const result = await plugin.afterTask({
           session_key: ctx.sessionKey,
-          task_type: 'agent_run',
-          task_summary: history[0]?.content?.slice(0, 200) ?? 'Agent run',
-          conversation_history: history.slice(-20),  // Last 20 messages to keep cost down
+          task_type: isSubagent ? 'subagent' : 'agent_run',
+          task_summary: window[0]?.content?.slice(0, 200) ?? 'Agent run',
+          conversation_history: window,
           signals: {
             user_feedback: null,
             review_result: event.success ? 'PASS' : 'FAIL',
@@ -229,31 +284,16 @@ const learnloopPlugin = {
 
         if (result.reflection_id) {
           log.info(`learnloop: reflection generated (${result.outcome}) for ${ctx.sessionKey}`);
-        } else {
-          log.info(`learnloop: [DBG] afterTask no reflection — outcome=${result.outcome}`);
         }
       } catch (err) {
         log.warn(`learnloop: afterTask error: ${String(err)}`);
       }
 
-      // Extract memories immediately (mem0-style — don't wait for next session)
-      try {
-        const memResult = await plugin.extractMemoriesNow(ctx.sessionKey, history.slice(-20));
-        if (memResult.extracted > 0) {
-          log.info(`learnloop: extracted ${memResult.extracted} memories (${memResult.conflicts} conflicts) for ${ctx.sessionKey}`);
-        }
-      } catch (err) {
-        log.warn(`learnloop: memory extraction error: ${String(err)}`);
-      }
-
-      // Clean up tracked conversation
       sessionConversations.delete(ctx.sessionKey);
     });
 
     // ======================================================================
-    // Hook: subagent_ended → afterTask (for sub-agent tasks)
-    //
-    // Sub-agent completions carry more structured task info (outcome, type).
+    // Hook: subagent_ended → afterTask (sub-agent tasks always reflect)
     // ======================================================================
 
     api.on('subagent_ended', async (
@@ -276,7 +316,7 @@ const learnloopPlugin = {
           session_key: sessionKey,
           task_type: 'subagent',
           task_summary: history[0]?.content?.slice(0, 200) ?? 'Sub-agent task',
-          conversation_history: history,
+          conversation_history: history.slice(-MAX_HISTORY_WINDOW),
           signals: {
             user_feedback: null,
             review_result: event.outcome === 'ok' ? 'PASS' : (event.outcome === 'error' ? 'FAIL' : null),
@@ -297,12 +337,7 @@ const learnloopPlugin = {
     });
 
     // ======================================================================
-    // Hook: subagent_spawning → beforeSpawn
-    //
-    // Not directly usable — subagent_spawning doesn't carry task_description
-    // in a way we can augment and return. The event is informational.
-    // We log it for now; augmentation happens via before_agent_start on the
-    // child session.
+    // Hook: subagent_spawning (informational)
     // ======================================================================
 
     api.on('subagent_spawning', async (
@@ -313,15 +348,15 @@ const learnloopPlugin = {
     });
 
     // ======================================================================
-    // Hook: session_end → cleanup conversation tracking
+    // Hook: session_end → cleanup
     // ======================================================================
 
     api.on('session_end', (
       event: { sessionId: string },
       _ctx: any,
     ) => {
-      // Clean up any remaining tracked conversations
       sessionConversations.delete(event.sessionId);
+      sessionStates.delete(event.sessionId);
     });
 
     // ======================================================================
@@ -330,12 +365,11 @@ const learnloopPlugin = {
 
     api.registerService({
       id: 'learnloop',
-      start: () => {
-        log.info(`learnloop: service started (db: ${plugin.config.dbPath})`);
-      },
+      start: () => log.info(`learnloop: service started (db: ${plugin.config.dbPath})`),
       stop: () => {
         log.info('learnloop: service stopped');
         sessionConversations.clear();
+        sessionStates.clear();
         learnloop = null;
       },
     });
@@ -347,17 +381,18 @@ const learnloopPlugin = {
     api.registerCli(
       ({ program }: any) => {
         const cmd = program.command('learnloop').description('LearnLoop memory & learning plugin');
-
-        cmd.command('stats')
-          .description('Show memory and reflection statistics')
+        cmd
+          .command('stats')
+          .description('Show memory and reflection counts')
           .action(async () => {
-            const p = getPlugin(api.pluginConfig);
-            console.log(`LearnLoop v0.1.0`);
-            console.log(`DB: ${p.config.dbPath}`);
-            console.log(`Retrieval weights: a=${p.config.retrieval.a} b=${p.config.retrieval.b} c=${p.config.retrieval.c}`);
+            const stats = {
+              dbPath: plugin.config.dbPath,
+              activeSessions: sessionStates.size,
+              trackedConversations: sessionConversations.size,
+            };
+            console.log(JSON.stringify(stats, null, 2));
           });
       },
-      { commands: ['learnloop'] },
     );
   },
 };
