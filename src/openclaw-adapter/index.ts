@@ -42,9 +42,15 @@ function getPlugin(pluginConfig?: Record<string, unknown>): OpenClawPlugin {
     };
   }
 
-  // Set LLM env vars from plugin config if provided
+  // Set LLM env vars: plugin config > existing env vars > ANTHROPIC_AUTH_TOKEN fallback
   if (pluginConfig?.apiKey && typeof pluginConfig.apiKey === 'string') {
     process.env['OPENCLAW_API_KEY'] = pluginConfig.apiKey;
+  } else if (!process.env['OPENCLAW_API_KEY'] && !process.env['OPENAI_API_KEY']) {
+    // Fallback: use ANTHROPIC_AUTH_TOKEN if no other key is set
+    const fallbackKey = process.env['ANTHROPIC_AUTH_TOKEN'] ?? process.env['ANTHROPIC_API_KEY'];
+    if (fallbackKey) {
+      process.env['OPENCLAW_API_KEY'] = fallbackKey;
+    }
   }
   if (pluginConfig?.apiBase && typeof pluginConfig.apiBase === 'string') {
     process.env['OPENCLAW_API_BASE'] = pluginConfig.apiBase;

@@ -76,7 +76,7 @@ export async function callLLM(history: Message[]): Promise<RawMemoryEntry[]> {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: process.env['OPENCLAW_LLM_MODEL'] ?? 'gpt-4o-mini',
         messages: [
           { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
           { role: 'user', content: buildExtractionUserContent(history) },
@@ -257,7 +257,7 @@ export async function callReflectionLLM(
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: process.env['OPENCLAW_LLM_MODEL'] ?? 'gpt-4o-mini',
         messages: [
           { role: 'system', content: REFLECTION_SYSTEM_PROMPT },
           {
