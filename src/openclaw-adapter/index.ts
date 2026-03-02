@@ -236,6 +236,16 @@ const learnloopPlugin = {
         log.warn(`learnloop: afterTask error: ${String(err)}`);
       }
 
+      // Extract memories immediately (mem0-style — don't wait for next session)
+      try {
+        const memResult = await plugin.extractMemoriesNow(ctx.sessionKey, history.slice(-20));
+        if (memResult.extracted > 0) {
+          log.info(`learnloop: extracted ${memResult.extracted} memories (${memResult.conflicts} conflicts) for ${ctx.sessionKey}`);
+        }
+      } catch (err) {
+        log.warn(`learnloop: memory extraction error: ${String(err)}`);
+      }
+
       // Clean up tracked conversation
       sessionConversations.delete(ctx.sessionKey);
     });

@@ -17,6 +17,8 @@
 import * as os from 'os';
 import * as path from 'path';
 import { initializeDatabase } from './storage/db.js';
+import { extractMemories } from './memory/index.js';
+import type { Message } from './types/index.js';
 import { createSearchEngine } from './search/index.js';
 import { StorageFacade } from './storage/facade.js';
 import {
@@ -82,6 +84,8 @@ export interface OpenClawPlugin {
   beforeTurn(input: BeforeTurnInput): Promise<BeforeTurnResult>;
   afterTask(input: AfterTaskInput): Promise<AfterTaskResult>;
   beforeSpawn(input: BeforeSpawnInput): Promise<BeforeSpawnResult>;
+  /** Extract memories from conversation history immediately (mem0-style) */
+  extractMemoriesNow(sessionKey: string, history: Message[]): Promise<{ extracted: number; conflicts: number }>;
   /** Resolved configuration used by this plugin instance */
   readonly config: { dbPath: string; retrieval: PluginRetrievalConfig };
 }
@@ -177,10 +181,28 @@ export function createPlugin(config?: PluginConfig): OpenClawPlugin {
   // Return plugin object
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // extractMemoriesNow — immediate memory extraction (mem0-style)
+  // -------------------------------------------------------------------------
+
+  async function extractMemoriesNow(
+    sessionKey: string,
+    history: Message[],
+  ): Promise<{ extracted: number; conflicts: number }> {
+    try {
+      const result = await extractMemories(db, facade, sessionKey, history);
+      return { extracted: result.extracted.length, conflicts: result.conflicts_resolved };
+    } catch (err) {
+      console.error('[LearnLoop] extractMemoriesNow: error', err);
+      return { extracted: 0, conflicts: 0 };
+    }
+  }
+
   return {
     beforeTurn,
     afterTask,
     beforeSpawn,
+    extractMemoriesNow,
     config: { dbPath, retrieval },
   };
 }
