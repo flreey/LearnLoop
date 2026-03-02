@@ -171,16 +171,40 @@ const learnloopPlugin = {
     ) => {
       if (!ctx.sessionKey) return;
 
-      // Build history from event.messages (agent_end fires BEFORE llm_output,
-      // so sessionConversations may not have the assistant reply yet).
-      // event.messages contains the full session message list from pi-agent-core.
+      // Build history from event.messages (agent_end fires BEFORE llm_output).
+      // pi-agent-core messages use Anthropic format where content can be:
+      //   - string (simple text)
+      //   - ContentBlock[] (array of {type:'text', text:string}, {type:'tool_use',...}, etc.)
       const rawMessages = Array.isArray(event.messages) ? event.messages : [];
-      const history: Message[] = rawMessages
-        .filter((m: any) => m && typeof m === 'object' && typeof m.role === 'string' && typeof m.content === 'string')
-        .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-        .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
-      log.info(`learnloop: [DBG] agent_end — session=${ctx.sessionKey} rawMsgs=${rawMessages.length} filteredHistory=${history.length}`);
+      function extractText(msg: any): string | null {
+        if (!msg || typeof msg !== 'object') return null;
+        const role = msg.role;
+        if (role !== 'user' && role !== 'assistant') return null;
+
+        // Case 1: content is a string
+        if (typeof msg.content === 'string') return msg.content;
+
+        // Case 2: content is an array of content blocks
+        if (Array.isArray(msg.content)) {
+          const textParts = msg.content
+            .filter((b: any) => b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
+            .map((b: any) => b.text);
+          return textParts.length > 0 ? textParts.join('\n') : null;
+        }
+
+        return null;
+      }
+
+      const history: Message[] = [];
+      for (const m of rawMessages) {
+        const text = extractText(m);
+        if (text && text.trim()) {
+          history.push({ role: (m as any).role, content: text });
+        }
+      }
+
+      log.info(`learnloop: [DBG] agent_end — session=${ctx.sessionKey} rawMsgs=${rawMessages.length} history=${history.length}`);
 
       // Only reflect on sessions with meaningful conversation (at least 1 user + 1 assistant)
       if (history.length < 2) {
