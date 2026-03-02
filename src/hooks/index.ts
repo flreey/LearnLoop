@@ -192,58 +192,55 @@ export async function handleAfterTask(
   // Step 1: Resolve outcome from signals synchronously
   const outcome = resolveOutcome(input.signals);
 
-  // Step 2: Fire async LLM call — non-blocking (AC9, constraint: non-blocking-reflection)
-  // generateReflection and DB write are NOT awaited in the return path.
-  Promise.resolve().then(async () => {
-    let raw: Awaited<ReturnType<typeof generateReflection>>;
-    try {
-      raw = await generateReflection(
-        input.task_type,
-        input.task_summary,
-        input.conversation_history,
-        input.signals,
-      );
-    } catch (err) {
-      // Silent degradation — log but never re-throw
-      console.error('[LearnLoop] afterTask: reflection generation failed', err);
-      return;
-    }
+  // Step 2: Await LLM call to obtain reflection_id (AC8: hook awaits LLM but NOT DB write)
+  // On LLM failure: return { reflection_id: null, outcome: null } (AC7, AC9, AC10)
+  let raw: Awaited<ReturnType<typeof generateReflection>>;
+  try {
+    raw = await generateReflection(
+      input.task_type,
+      input.task_summary,
+      input.conversation_history,
+      input.signals,
+    );
+  } catch (err) {
+    // AC9/AC10: Silent degradation — log but never re-throw
+    console.error('[LearnLoop] afterTask: reflection generation failed', err);
+    return { reflection_id: null, outcome: null };
+  }
 
-    if (raw === null) {
-      // LLM returned null (e.g., no API key, parse failure) — silent degradation
-      return;
-    }
+  if (raw === null) {
+    // LLM returned null (e.g., no API key, parse failure) — silent degradation (AC7)
+    return { reflection_id: null, outcome: null };
+  }
 
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    const entry: ReflectionEntry = {
-      id,
-      task_type: raw.task_type,
-      task_summary: raw.task_summary,
-      outcome: raw.outcome,
-      signals: JSON.stringify(input.signals),
-      reflection: raw.reflection,
-      lessons: JSON.stringify(raw.lessons),
-      agent_id: input.agent_id,
-      source_session: input.session_key,
-      created_at: now,
-    };
+  // Step 3: LLM succeeded — generate ID, fire-and-forget DB write (AC8)
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const entry: ReflectionEntry = {
+    id,
+    task_type: raw.task_type,
+    task_summary: raw.task_summary,
+    outcome: raw.outcome,
+    signals: JSON.stringify(input.signals),
+    reflection: raw.reflection,
+    lessons: JSON.stringify(raw.lessons),
+    agent_id: input.agent_id,
+    source_session: input.session_key,
+    created_at: now,
+  };
 
+  // Fire-and-forget DB write — do NOT await (AC8: "hook 返回后主流程不等待反思写入完成")
+  Promise.resolve().then(() => {
     try {
       facade.addReflection(entry);
     } catch (err) {
-      // Silent degradation — log but never re-throw
       console.error('[LearnLoop] afterTask: failed to persist reflection', err);
     }
   }).catch((err) => {
-    // Outer catch for any unexpected errors in the async chain
     console.error('[LearnLoop] afterTask: unexpected error in async chain', err);
   });
 
-  // Return null reflection_id and resolved outcome immediately — before LLM call completes.
-  // The async chain above will persist the reflection if LLM succeeds.
-  // AC11 (silent degradation): if LLM fails, reflection_id=null is the default response.
-  return { reflection_id: null, outcome };
+  return { reflection_id: id, outcome };
 }
 
 // ---------------------------------------------------------------------------

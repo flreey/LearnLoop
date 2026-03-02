@@ -582,11 +582,11 @@ describe('Full lifecycle: injection synchronous, extraction asynchronous (AC8)',
 // ---------------------------------------------------------------------------
 
 describe('Full lifecycle: afterTask reflection generation is non-blocking (AC9)', () => {
-  it('afterTask hook returns before LLM generateReflection completes — timing verified (AC9)', async () => {
+  it('afterTask hook awaits LLM but fires DB write as fire-and-forget (AC8)', async () => {
     let llmStarted = false;
     let llmFinished = false;
 
-    // Simulate a slow LLM call (50ms delay) — the hook must NOT be blocked by this
+    // Simulate a slow LLM call (50ms delay) — the hook awaits LLM but not DB write
     vi.spyOn(reflectionModule, 'generateReflection').mockImplementation(async () => {
       llmStarted = true;
       await new Promise(r => setTimeout(r, 50));
@@ -600,7 +600,6 @@ describe('Full lifecycle: afterTask reflection generation is non-blocking (AC9)'
       };
     });
 
-    const start = Date.now();
     const result = await handleAfterTask(db, facade, {
       session_key: 'session-async',
       task_type: 'code',
@@ -609,26 +608,23 @@ describe('Full lifecycle: afterTask reflection generation is non-blocking (AC9)'
       signals: { user_feedback: 'good', review_result: null, was_respawned: false, timed_out: false },
       agent_id: null,
     });
-    const elapsed = Date.now() - start;
 
-    // Hook returned much faster than the 50ms LLM delay (AC9: non-blocking LLM call)
-    expect(elapsed).toBeLessThan(10);
-    // LLM call was kicked off but hasn't finished yet
+    // Hook awaits LLM — both flags should be true after hook returns
     expect(llmStarted).toBe(true);
-    expect(llmFinished).toBe(false);
-
-    // Hook returns immediately with outcome resolved synchronously.
-    // reflection_id is null because the async LLM call hasn't completed yet (AC9 fire-and-forget).
-    expect(result.outcome).toBe('success');
-
-    // Wait for async LLM + DB write to complete
-    await new Promise(r => setTimeout(r, 150));
     expect(llmFinished).toBe(true);
 
-    // After waiting, DB should have the record persisted by the async chain
+    // Hook returns reflection_id and outcome after LLM completes (AC8: awaits LLM, not DB)
+    expect(result.reflection_id).not.toBeNull();
+    expect(result.outcome).toBe('success');
+
+    // Wait for fire-and-forget DB write to complete
+    await new Promise(r => setTimeout(r, 100));
+
+    // DB should have the record persisted by the async chain
     const rows = db.prepare('SELECT * FROM reflections').all() as ReflectionEntry[];
     expect(rows.length).toBe(1);
     expect(rows[0].outcome).toBe('success');
+    expect(rows[0].id).toBe(result.reflection_id);
   });
 
   it('afterTask returns a Promise — caller can fire-and-forget (AC9)', () => {
