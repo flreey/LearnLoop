@@ -139,6 +139,7 @@ const learnloopPlugin = {
         }
       }
       sessionConversations.set(ctx.sessionKey, existing);
+      log.info(`learnloop: [DBG] llm_output — session=${ctx.sessionKey} totalMsgs=${existing.length}`);
     });
 
     // ======================================================================
@@ -154,6 +155,7 @@ const learnloopPlugin = {
       const existing = sessionConversations.get(ctx.sessionKey) || [];
       existing.push({ role: 'user', content: event.prompt });
       sessionConversations.set(ctx.sessionKey, existing);
+      log.info(`learnloop: [DBG] llm_input — session=${ctx.sessionKey} totalMsgs=${existing.length}`);
     });
 
     // ======================================================================
@@ -169,17 +171,29 @@ const learnloopPlugin = {
     ) => {
       if (!ctx.sessionKey) return;
 
-      const history = sessionConversations.get(ctx.sessionKey) || [];
+      // Build history from event.messages (agent_end fires BEFORE llm_output,
+      // so sessionConversations may not have the assistant reply yet).
+      // event.messages contains the full session message list from pi-agent-core.
+      const rawMessages = Array.isArray(event.messages) ? event.messages : [];
+      const history: Message[] = rawMessages
+        .filter((m: any) => m && typeof m === 'object' && typeof m.role === 'string' && typeof m.content === 'string')
+        .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+        .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
 
-      // Only reflect on sessions with meaningful conversation
-      if (history.length < 2) return;
+      log.info(`learnloop: [DBG] agent_end — session=${ctx.sessionKey} rawMsgs=${rawMessages.length} filteredHistory=${history.length}`);
+
+      // Only reflect on sessions with meaningful conversation (at least 1 user + 1 assistant)
+      if (history.length < 2) {
+        log.info(`learnloop: [DBG] agent_end SKIPPED — history too short (${history.length})`);
+        return;
+      }
 
       try {
         const result = await plugin.afterTask({
           session_key: ctx.sessionKey,
           task_type: 'agent_run',
           task_summary: history[0]?.content?.slice(0, 200) ?? 'Agent run',
-          conversation_history: history,
+          conversation_history: history.slice(-20),  // Last 20 messages to keep cost down
           signals: {
             user_feedback: null,
             review_result: event.success ? 'PASS' : 'FAIL',
@@ -191,6 +205,8 @@ const learnloopPlugin = {
 
         if (result.reflection_id) {
           log.info(`learnloop: reflection generated (${result.outcome}) for ${ctx.sessionKey}`);
+        } else {
+          log.info(`learnloop: [DBG] afterTask no reflection — outcome=${result.outcome}`);
         }
       } catch (err) {
         log.warn(`learnloop: afterTask error: ${String(err)}`);
