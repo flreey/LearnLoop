@@ -119,7 +119,11 @@ export function createPlugin(config?: PluginConfig): OpenClawPlugin {
   const engine = createSearchEngine(db);
   const facade = new StorageFacade(db, engine);
 
-
+  // Fire-and-forget: initialize embedding model + backfill missing embeddings
+  // Silent degradation — if model fails to load, vector search is simply skipped
+  facade.initEmbedding()
+    .then(() => facade.backfillEmbeddings())
+    .catch((err) => console.warn('[LearnLoop] Embedding init/backfill failed:', err));
 
   // -------------------------------------------------------------------------
   // beforeTurn

@@ -65,6 +65,7 @@ const SESSION_STATE_INDEXES = [
  * Initialize (or open) the SQLite database at the given path.
  * The directory is created recursively if it does not exist.
  * All tables and indexes are created via IF NOT EXISTS DDL.
+ * Runs schema migrations for existing databases (e.g., adding embedding column).
  */
 export function initializeDatabase(dbPath: string): DB {
   const dir = path.dirname(dbPath);
@@ -87,6 +88,14 @@ export function initializeDatabase(dbPath: string): DB {
   }
   for (const idx of SESSION_STATE_INDEXES) {
     db.exec(idx);
+  }
+
+  // Schema migration: add embedding BLOB column if not present
+  // ALTER TABLE fails if column already exists — we catch and ignore that error
+  try {
+    db.exec('ALTER TABLE memories ADD COLUMN embedding BLOB');
+  } catch {
+    // Column already exists — ignore
   }
 
   return db;

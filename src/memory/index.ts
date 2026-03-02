@@ -2,6 +2,9 @@
  * Memory extraction, conflict detection, retrieval, and injection.
  * Implements: extractMemories, detectAndUpsert, lazyExtractionCheck,
  *             retrieveMemories, injectMemories
+ *
+ * retrieveMemories uses hybrid search (BM25 + vector) for better semantic recall.
+ * Vector search degrades silently to pure BM25 if model is not ready.
  */
 
 import { randomUUID } from 'crypto';
@@ -171,7 +174,7 @@ export function detectAndUpsert(
  * conflict detection (upsert). Returns extracted memories and conflicts_resolved count.
  *
  * - LLM call failure → silent degradation (return empty result, no throw)
- * - Empty conversation or empty LLM response ��� return empty result
+ * - Empty conversation or empty LLM response → return empty result
  */
 export async function extractMemories(
   db: DB,
@@ -280,14 +283,62 @@ function normalizeRelevanceScores(
 }
 
 /**
+ * Normalize vector similarity scores (already in [-1, 1] for cosine) to [0, 1].
+ * We use (score + 1) / 2 to shift from [-1,1] to [0,1].
+ * Then re-normalize by max to keep relative ordering.
+ */
+function normalizeVectorScores(
+  searchResults: Array<{ id: string; score: number }>,
+): Map<string, number> {
+  if (searchResults.length === 0) return new Map();
+
+  const normalized = new Map<string, number>();
+  const maxScore = Math.max(...searchResults.map(r => r.score));
+
+  for (const r of searchResults) {
+    // Cosine similarity is in [-1, 1]; normalize to [0, 1] then scale by max
+    const shifted = (r.score + 1) / 2;
+    const maxShifted = (maxScore + 1) / 2;
+    normalized.set(r.id, maxShifted > 0 ? shifted / maxShifted : 0);
+  }
+
+  return normalized;
+}
+
+/**
+ * Hybrid relevance score combining BM25 and vector search.
+ * hybrid_relevance = 0.3 * bm25_score + 0.7 * vector_score
+ * If vector search is unavailable, falls back to pure BM25 (vector_score = 0, rescaled).
+ */
+function computeHybridRelevance(
+  id: string,
+  bm25Map: Map<string, number>,
+  vectorMap: Map<string, number>,
+  hasVector: boolean,
+): number {
+  const bm25 = bm25Map.get(id) ?? 0;
+  const vector = vectorMap.get(id) ?? 0;
+
+  if (!hasVector) {
+    // Pure BM25 fallback
+    return bm25;
+  }
+
+  return 0.3 * bm25 + 0.7 * vector;
+}
+
+/**
  * Tri-dimensional memory retrieval combining:
  *   score = a * recency + b * relevance + c * importance
  *
- * Only memories with BM25 matches are returned (relevance > 0 required).
- * After returning top-N memories, updates access_count and last_accessed_at.
+ * relevance is now hybrid: 0.3 * BM25 + 0.7 * vector (when vector available).
+ * Falls back to pure BM25 if vector search fails.
+ *
+ * Candidate set: union of BM25 matches + top-K vector matches.
+ * If BM25 returns 0 results AND vector search is available, uses vector-only candidates.
  *
  * @param db        SQLite database handle
- * @param facade    StorageFacade for index access (provides BM25 search)
+ * @param facade    StorageFacade for index access (provides BM25 + vector search)
  * @param query     Search query string
  * @param limit     Maximum number of memories to return
  * @param weights   Optional custom weights (overrides defaults)
@@ -308,44 +359,70 @@ export async function retrieveMemories(
   };
   const decayLambda = lambda ?? DEFAULT_DECAY_LAMBDA;
 
-  // Step 1: BM25 search — only consider memories with relevance matches
-  const searchResults = facade.searchMemories(query);
+  // Step 1: BM25 search
+  const bm25Results = facade.searchMemories(query);
 
-  if (searchResults.length === 0) {
+  // Step 2: Vector search — only attempted if embedding model is ready (no blocking init)
+  let vectorResults: Array<{ id: string; score: number }> = [];
+  let hasVector = false;
+
+  if (facade.isEmbeddingReady) {
+    try {
+      const queryEmbedding = await facade.embedText(query);
+      if (queryEmbedding) {
+        vectorResults = facade.searchMemoriesByVector(queryEmbedding, limit * 3);
+        hasVector = vectorResults.length > 0;
+      }
+    } catch {
+      // Silent degradation — vector search failure does not affect BM25 results
+      hasVector = false;
+    }
+  }
+
+  // Step 3: Build candidate set (union of BM25 + vector matches)
+  const candidateIds = new Set<string>();
+
+  for (const r of bm25Results) candidateIds.add(r.id);
+  for (const r of vectorResults) candidateIds.add(r.id);
+
+  // If no candidates at all, return empty
+  if (candidateIds.size === 0) {
     return { memories: [] };
   }
 
-  // Step 2: Normalize relevance scores to [0, 1]
-  const relevanceMap = normalizeRelevanceScores(searchResults);
+  // Step 4: Normalize scores
+  const bm25Map = normalizeRelevanceScores(bm25Results);
+  const vectorMap = normalizeVectorScores(vectorResults);
 
-  // Step 3: Load full memory entries for matched IDs
-  const matchedIds = new Set(searchResults.map(r => r.id));
+  // Step 5: Load full memory entries for all candidates
+  const idList = [...candidateIds];
+  const placeholders = idList.map(() => '?').join(',');
   const allMemories = db
-    .prepare('SELECT * FROM memories WHERE id IN (' + [...matchedIds].map(() => '?').join(',') + ')')
-    .all([...matchedIds]) as MemoryEntry[];
+    .prepare(`SELECT * FROM memories WHERE id IN (${placeholders})`)
+    .all(idList) as MemoryEntry[];
 
   if (allMemories.length === 0) {
     return { memories: [] };
   }
 
-  // Step 4: Compute scores
+  // Step 6: Compute scores
   const now = new Date();
   const scored: ScoredMemoryEntry[] = allMemories.map(mem => {
     const recency = computeRecency(mem, decayLambda, now);
-    const relevance = relevanceMap.get(mem.id) ?? 0;
+    const relevance = computeHybridRelevance(mem.id, bm25Map, vectorMap, hasVector);
     const importance = mem.importance;
     const score = w.recency * recency + w.relevance * relevance + w.importance * importance;
 
     return { ...mem, score };
   });
 
-  // Step 5: Sort descending by score
+  // Step 7: Sort descending by score
   scored.sort((a, b) => b.score - a.score);
 
-  // Step 6: Take top-N
+  // Step 8: Take top-N
   const topN = scored.slice(0, limit);
 
-  // Step 7: Update access tracking for returned memories
+  // Step 9: Update access tracking for returned memories
   const accessedAt = new Date().toISOString();
   for (const mem of topN) {
     updateMemory(db, mem.id, {

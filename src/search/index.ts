@@ -1,4 +1,4 @@
-// BM25 search engine wrapper (minisearch integration)
+// BM25 search engine wrapper (minisearch integration) + local vector embedding
 
 import MiniSearch from 'minisearch';
 import type { DB } from '../storage/db.js';
@@ -60,6 +60,109 @@ export interface SearchResult {
 }
 
 // ---------------------------------------------------------------------------
+// EmbeddingEngine — lazy-loaded local model for vector embeddings
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps @huggingface/transformers pipeline for generating 384-dim embeddings.
+ * Model: Xenova/paraphrase-multilingual-MiniLM-L12-v2 (~140MB, cached after first load).
+ *
+ * IMPORTANT: init() must be called explicitly (e.g., at startup or during backfill).
+ * The embedText() method does NOT trigger init() — it returns null immediately if not ready.
+ * This prevents retrieval path timeouts when the model is loading or unavailable.
+ */
+export class EmbeddingEngine {
+  private pipeline: ((text: string, options?: Record<string, unknown>) => Promise<{ data: Float32Array }>) | null = null;
+  private loading: Promise<void> | null = null;
+  private _failed = false;
+
+  /**
+   * Initialize the embedding pipeline.
+   * Must be called explicitly — NOT triggered by embedText().
+   * On failure, sets failed=true for silent degradation.
+   */
+  async init(): Promise<void> {
+    if (this.pipeline !== null || this._failed) return;
+    if (this.loading) {
+      await this.loading;
+      return;
+    }
+
+    this.loading = (async () => {
+      try {
+        // Dynamic import so startup doesn't load the heavy model unless needed
+        const { pipeline, env } = await import('@huggingface/transformers');
+        // Allow local cache usage
+        env.allowLocalModels = true;
+        const pipe = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
+          dtype: 'fp32',
+        });
+        // Store as typed function — actual type from transformers is complex, we cast
+        this.pipeline = pipe as unknown as (text: string, options?: Record<string, unknown>) => Promise<{ data: Float32Array }>;
+      } catch (err) {
+        console.warn('[LearnLoop] EmbeddingEngine: model load failed, vector search disabled:', (err as Error).message);
+        this._failed = true;
+      }
+    })();
+
+    await this.loading;
+  }
+
+  /**
+   * Returns true if the embedding model is ready to use.
+   */
+  get isReady(): boolean {
+    return this.pipeline !== null && !this._failed;
+  }
+
+  /**
+   * Returns true if the model has failed to load.
+   */
+  get failed(): boolean {
+    return this._failed;
+  }
+
+  /**
+   * Generate a 384-dim embedding for the given text.
+   * Returns null immediately if model is not ready (does NOT trigger init).
+   * Silent degradation — callers should handle null gracefully.
+   */
+  async embedText(text: string): Promise<Float32Array | null> {
+    // Never trigger model load from the retrieval hot path
+    if (!this.isReady) return null;
+
+    try {
+      const output = await this.pipeline!(text, { pooling: 'mean', normalize: true });
+      // output.data is the flat Float32Array of the pooled embedding
+      return output.data instanceof Float32Array ? output.data : new Float32Array(output.data);
+    } catch (err) {
+      console.warn('[LearnLoop] EmbeddingEngine: embedText failed:', (err as Error).message);
+      return null;
+    }
+  }
+}
+
+// Singleton embedding engine shared across SearchEngine instances
+const globalEmbeddingEngine = new EmbeddingEngine();
+
+// ---------------------------------------------------------------------------
+// Cosine similarity
+// ---------------------------------------------------------------------------
+
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+// ---------------------------------------------------------------------------
 // SearchEngine class
 // ---------------------------------------------------------------------------
 
@@ -67,7 +170,15 @@ export class SearchEngine {
   private memoryIndex: MiniSearch<MemoryDoc>;
   private reflectionIndex: MiniSearch<ReflectionDoc>;
 
-  constructor() {
+  // In-memory vector index: memoryId -> embedding Float32Array
+  private vectorIndex: Map<string, Float32Array> = new Map();
+
+  // Embedding engine (shared singleton or injected for testing)
+  private embeddingEngine: EmbeddingEngine;
+
+  constructor(embeddingEngine?: EmbeddingEngine) {
+    this.embeddingEngine = embeddingEngine ?? globalEmbeddingEngine;
+
     this.memoryIndex = new MiniSearch<MemoryDoc>({
       idField: 'id',
       fields: ['content', 'subject'],
@@ -126,6 +237,7 @@ export class SearchEngine {
 
   removeMemory(id: string): void {
     this.memoryIndex.discard(id);
+    this.vectorIndex.delete(id);
   }
 
   searchMemories(query: string): SearchResult[] {
@@ -135,6 +247,84 @@ export class SearchEngine {
     } catch {
       return [];
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Vector index operations
+  // -------------------------------------------------------------------------
+
+  /**
+   * Store a pre-computed embedding in the in-memory vector index.
+   */
+  setEmbedding(id: string, embedding: Float32Array): void {
+    this.vectorIndex.set(id, embedding);
+  }
+
+  /**
+   * Load embeddings from DB into the in-memory vector index.
+   * Reads all rows with non-null embedding BLOB.
+   */
+  loadEmbeddingsFromDB(db: DB): void {
+    try {
+      const rows = db
+        .prepare('SELECT id, embedding FROM memories WHERE embedding IS NOT NULL')
+        .all() as Array<{ id: string; embedding: Buffer }>;
+
+      for (const row of rows) {
+        if (row.embedding) {
+          const embedding = new Float32Array(
+            row.embedding.buffer,
+            row.embedding.byteOffset,
+            row.embedding.byteLength / 4,
+          );
+          this.vectorIndex.set(row.id, embedding);
+        }
+      }
+    } catch (err) {
+      console.warn('[LearnLoop] SearchEngine: failed to load embeddings from DB:', (err as Error).message);
+    }
+  }
+
+  /**
+   * Generate embedding for text using the embedding engine.
+   * Returns null immediately if model is not ready (no blocking init).
+   */
+  async embedText(text: string): Promise<Float32Array | null> {
+    return this.embeddingEngine.embedText(text);
+  }
+
+  /**
+   * Trigger explicit init of the embedding model.
+   * Should be called at startup, NOT during retrieval.
+   */
+  async initEmbedding(): Promise<void> {
+    await this.embeddingEngine.init();
+  }
+
+  /**
+   * Returns true if the embedding engine is ready to produce embeddings.
+   */
+  get isEmbeddingReady(): boolean {
+    return this.embeddingEngine.isReady;
+  }
+
+  /**
+   * Pure vector search: compute cosine similarity against all indexed embeddings.
+   * Returns results sorted by descending similarity.
+   * Linear scan — efficient for <=2000 entries.
+   */
+  searchMemoriesByVector(queryEmbedding: Float32Array, limit: number): SearchResult[] {
+    if (this.vectorIndex.size === 0) return [];
+
+    const results: SearchResult[] = [];
+    for (const [id, embedding] of this.vectorIndex) {
+      const score = cosineSimilarity(queryEmbedding, embedding);
+      results.push({ id, score });
+    }
+
+    // Sort descending by score
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, limit);
   }
 
   // -------------------------------------------------------------------------
@@ -192,6 +382,7 @@ export class SearchEngine {
 /**
  * Create a SearchEngine and populate its indexes from the current database
  * contents. This implements AC10: the index is rebuilt from DB on init.
+ * Also loads pre-existing embeddings from DB into the in-memory vector index.
  */
 export function createSearchEngine(db: DB): SearchEngine {
   const engine = new SearchEngine();
@@ -248,5 +439,11 @@ export function createSearchEngine(db: DB): SearchEngine {
     );
   }
 
+  // Load pre-existing embeddings into vector index (synchronous, from DB BLOB)
+  engine.loadEmbeddingsFromDB(db);
+
   return engine;
 }
+
+// Export singleton embedding engine for external use (e.g., backfill)
+export { globalEmbeddingEngine };
