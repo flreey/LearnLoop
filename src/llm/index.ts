@@ -1,6 +1,9 @@
 /**
- * LLM client wrapper for GPT-4o-mini calls via OpenClaw proxy.
- * Handles memory extraction prompts and silent degradation on failure.
+ * LLM client wrapper for memory extraction and reflection generation.
+ * Handles silent degradation on failure + markdown code fence stripping.
+ *
+ * NOTE: cyberbub proxy does not reliably pass system messages to Claude.
+ * All prompts are sent as a single user message to ensure instruction following.
  */
 
 import type { Message, MemoryType, OutcomeType, TaskSignals } from '../types/index.js';
@@ -42,9 +45,14 @@ export interface RawMemoryEntry {
 // Prompt construction
 // ---------------------------------------------------------------------------
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a memory extraction assistant. Analyze the conversation and extract memorable information.
+function buildExtractionPrompt(history: Message[]): string {
+  const lines = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
+  // Keep conversation excerpt concise for cost target < $0.002
+  const conversationExcerpt = lines.slice(0, 3000);
 
-Return ONLY raw JSON. No markdown code blocks, no explanation, no extra text.
+  return `You are a memory extraction assistant. Analyze the conversation below and extract memorable information.
+
+IMPORTANT: You MUST respond with ONLY a raw JSON object. No explanation, no markdown, no code fences, no commentary. Just the JSON.
 
 Return a JSON object with a "memories" key containing an array of memory entries. Each entry must have:
 - type: "preference" | "fact" | "entity" | "episode"
@@ -61,12 +69,12 @@ Types:
 - preference: user likes/dislikes, settings, style preferences
 - fact: factual information about the user or world
 - entity: people, places, organizations mentioned
-- episode: specific events or interactions that occurred`;
+- episode: specific events or interactions that occurred
 
-function buildExtractionUserContent(history: Message[]): string {
-  const lines = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
-  // Keep prompt concise for cost target < $0.002
-  return `Extract memories from this conversation:\n\n${lines.slice(0, 3000)}`;
+Conversation:
+${conversationExcerpt}
+
+Respond with ONLY the JSON object:`;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,8 +109,7 @@ export async function callLLM(history: Message[]): Promise<RawMemoryEntry[]> {
       body: JSON.stringify({
         model: process.env['OPENCLAW_LLM_MODEL'] ?? 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
-          { role: 'user', content: buildExtractionUserContent(history) },
+          { role: 'user', content: buildExtractionPrompt(history) },
         ],
         temperature: 0.1,
         max_tokens: 1000,
@@ -214,20 +221,7 @@ export interface RawReflectionEntry {
 // Reflection prompt construction
 // ---------------------------------------------------------------------------
 
-const REFLECTION_SYSTEM_PROMPT = `You are a reflection assistant using Reflexion methodology. Analyze the task context and generate a structured reflection entry.
-
-Return ONLY raw JSON. No markdown code blocks, no explanation, no extra text.
-
-Return a JSON object with these fields:
-- task_type: "code" | "research" | "deployment" (classify the task)
-- task_summary: string (concise one-sentence summary of what was done)
-- outcome: "success" | "failure" | "partial" (use the resolved outcome provided)
-- reflection: string (what happened, what worked, what didn't, Reflexion-style retrospective)
-- lessons: array of strings (2-5 actionable lessons learned)
-
-Keep reflection concise (2-4 sentences). Lessons should be specific and actionable.`;
-
-function buildReflectionUserContent(
+function buildReflectionPrompt(
   task_type: string,
   task_summary: string,
   history: Message[],
@@ -241,7 +235,20 @@ function buildReflectionUserContent(
 
   const signalsStr = JSON.stringify(signals);
 
-  return `Task Type: ${task_type}
+  return `You are a reflection assistant using Reflexion methodology. Analyze the task context below and generate a structured reflection entry.
+
+IMPORTANT: You MUST respond with ONLY a raw JSON object. No explanation, no markdown, no code fences, no commentary. Just the JSON.
+
+Return a JSON object with these fields:
+- task_type: "code" | "research" | "deployment" (classify the task)
+- task_summary: string (concise one-sentence summary of what was done)
+- outcome: "success" | "failure" | "partial" (use the resolved outcome provided)
+- reflection: string (what happened, what worked, what didn't, Reflexion-style retrospective)
+- lessons: array of strings (2-5 actionable lessons learned)
+
+Keep reflection concise (2-4 sentences). Lessons should be specific and actionable.
+
+Task Type: ${task_type}
 Task Summary: ${task_summary}
 Resolved Outcome: ${outcome}
 Signals: ${signalsStr}
@@ -249,7 +256,7 @@ Signals: ${signalsStr}
 Recent Conversation:
 ${historyStr.slice(0, 2000)}
 
-Generate a structured reflection for this task.`;
+Respond with ONLY the JSON object:`;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,11 +292,7 @@ export async function callReflectionLLM(
       body: JSON.stringify({
         model: process.env['OPENCLAW_LLM_MODEL'] ?? 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: REFLECTION_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: buildReflectionUserContent(task_type, task_summary, history, signals, outcome),
-          },
+          { role: 'user', content: buildReflectionPrompt(task_type, task_summary, history, signals, outcome) },
         ],
         temperature: 0.3,
         max_tokens: 800,
