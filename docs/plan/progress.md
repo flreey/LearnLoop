@@ -178,3 +178,12 @@
 **Total Attempts**: 3
 **Files**: docs/plan/index.json, docs/plan/phases/phase-3.json, src/hooks/index.ts
 
+
+## Iteration 21 - 2026-03-05 04:20:39
+
+**Task**: TASK-4.1 — Create openclaw.plugin.json and register package.json extensions
+**Result**: ✅ completed
+**Steps**: implement: pass (1 attempts, round 1)
+**Total Attempts**: 1
+**Files**: docs/plan/index.json, openclaw.plugin.json, package.json, src/config/index.ts, src/hooks/index.ts, src/index.ts, src/llm/index.ts, src/memory/index.ts, src/openclaw-adapter/index.ts, src/plugin.ts, src/reflection/index.ts, src/search/index.ts, src/storage/db.ts, src/storage/facade.ts, src/storage/index.ts, src/storage/repository.ts, src/types/index.ts, test/hooks/after-task.test.ts, test/hooks/before-spawn.test.ts, test/hooks/before-turn.test.ts, test/hooks/full-lifecycle-e2e.test.ts, test/hooks/memory-retrieval-latency.test.ts, test/hooks/reflection-e2e-loop.test.ts, test/integration.ts, test/memory/bdd-task-be-1-1.test.ts, test/memory/llm-strip-code-fences.test.ts, test/memory/memory-extraction.test.ts, test/memory/memory-retrieval.test.ts, test/plugin.test.ts, test/project-skeleton.test.ts, test/reflection/reflection.test.ts, test/search/bm25-search.test.ts, test/search/search-engine.test.ts, test/storage/repository.test.ts
+
