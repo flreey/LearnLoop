@@ -6,8 +6,6 @@ dist/
 package-lock.json
 loop.log
 .claude/
-!.claude/hooks.json
 
 # wf hooks runtime (config is tracked)
-.claude/wf-events.jsonl
 wf-events.jsonl
