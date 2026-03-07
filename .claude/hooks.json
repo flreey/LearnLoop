@@ -1,0 +1,5 @@
+[
+  { "type": "stdout", "target": "" },
+  { "type": "file", "target": "./wf-events.jsonl" },
+  { "type": "script", "target": "~/.local/bin/wf-discord-hook.py" }
+]
