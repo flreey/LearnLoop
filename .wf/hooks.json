@@ -1,5 +1,5 @@
 [
   { "type": "stdout", "target": "" },
   { "type": "file", "target": "./wf-events.jsonl" },
-  { "type": "script", "target": "/Users/openclaw/projects/agile-dev-agent-bootstrap/scripts/discord-hook.py" }
+  { "type": "script", "target": "~/.local/bin/wf-discord-hook.py" }
 ]
