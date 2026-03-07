@@ -8,5 +8,5 @@ loop.log
 .claude/
 
 # wf hooks runtime (config is tracked)
-.wf/wf-events.jsonl
+.claude/wf-events.jsonl
 wf-events.jsonl
