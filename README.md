@@ -12,13 +12,13 @@ LearnLoop hooks into OpenClaw's agent lifecycle and does three things automatica
 
 **2. Reflection Generation** — When a task completes (success or failure), the system generates a structured reflection: what happened, what worked, what didn't, and actionable lessons.
 
-**3. Context Injection** — Before each new agent run, relevant memories and reflections are retrieved via BM25 + tri-dimensional scoring and injected into the agent's context.
+**3. Context Injection** — Before each new agent run, relevant memories and reflections are retrieved via hybrid search (BM25 + local vector embeddings) with tri-dimensional scoring and injected into the agent's context.
 
 ```
 Session ends → LLM extracts memories → SQLite
 Task completes → LLM generates reflection → SQLite
                                               ↓
-New session/task ← BM25 + scoring ←──────────┘
+New session/task ← hybrid search + scoring ───┘
 ```
 
 ## Quick Start
@@ -161,12 +161,14 @@ Memories are scored using a tri-dimensional formula:
 ```
 score = a × recency + b × relevance + c × importance
 
-recency = exp(-λ × age_in_days)
-relevance = BM25 score (normalized)
+recency   = exp(-λ × age_in_days)
+relevance = 0.3 × BM25 + 0.7 × vector_similarity  (falls back to pure BM25 if embeddings unavailable)
 importance = stored importance value (0-1)
 ```
 
 Default weights: 30% recency, 50% relevance, 20% importance.
+
+Vector embeddings use a local 384-dim model (`@huggingface/transformers`), no external API required. The embedding engine loads lazily on first search and is shared across all search instances.
 
 ### Reflection Outcomes
 
