@@ -197,3 +197,13 @@
 **Files**: docs/plan/index.json, src/openclaw-adapter/index.ts, vitest.config.ts
 **Tokens**: 37 in / 15.7k out, $1.3607
 
+
+## Iteration 23 - 2026-03-14 10:33:16
+
+**Task**: TASK-4.2 — Replace fixed MAX_HISTORY_WINDOW count with token-budget-based truncation
+**Result**: ✅ completed
+**Steps**: implement: pass (1 attempts, round 1)
+**Total Attempts**: 1
+**Files**: docs/plan/index.json, src/openclaw-adapter/index.ts
+**Tokens**: 27 in / 10.7k out, $0.7477
+

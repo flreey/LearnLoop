@@ -302,10 +302,10 @@
       "id": 4,
       "name": "Quick Dev: 两个优化任务：(1) 迁移 before_agent_start → befor...",
       "type": "shared",
-      "status": "in_progress",
+      "status": "completed",
       "depends": [],
       "task_count": 2,
-      "completed_count": 1,
+      "completed_count": 2,
       "file": "phases/phase-4.json"
     }
   ],
@@ -324,13 +324,13 @@
   },
   "current_focus": {
     "phase_id": 4,
-    "task_id": "TASK-4.1"
+    "task_id": "TASK-4.2"
   },
   "stats": {
     "total_phases": 5,
     "total_tasks": 19,
-    "completed_tasks": 18,
-    "pending_tasks": 1,
+    "completed_tasks": 19,
+    "pending_tasks": 0,
     "blocked_tasks": 0,
     "in_progress": 0
   }

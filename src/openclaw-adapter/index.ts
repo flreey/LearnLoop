@@ -30,8 +30,33 @@ import type { Message } from '../types/index.js';
 /** Minimum interval between extraction+reflection per session (ms) */
 const THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 
-/** Max messages to send to LLM per call */
-const MAX_HISTORY_WINDOW = 10;
+/** Token budget for messages sent to LLM per call (chars/4 heuristic) */
+const MAX_HISTORY_TOKENS = 4000;
+
+/**
+ * Estimate token count for an array of messages using a chars/4 heuristic.
+ */
+function estimateTokens(messages: Message[]): number {
+  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  return Math.ceil(totalChars / 4);
+}
+
+/**
+ * Truncate messages to fit within the token budget.
+ * Iterates from newest to oldest, keeping messages until budget is exceeded.
+ */
+function truncateToTokenBudget(messages: Message[], budgetTokens: number = MAX_HISTORY_TOKENS): Message[] {
+  if (messages.length === 0) return [];
+  let accumulated = 0;
+  const kept: Message[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msgTokens = estimateTokens([messages[i]]);
+    if (accumulated + msgTokens > budgetTokens) break;
+    accumulated += msgTokens;
+    kept.unshift(messages[i]);
+  }
+  return kept;
+}
 
 // ---------------------------------------------------------------------------
 // Per-session state for delta tracking + throttling
@@ -217,7 +242,7 @@ const learnloopPlugin = {
     // Cost controls:
     //   1. Throttle: skip if same session ran < 5min ago
     //   2. Delta: only new messages since last extraction
-    //   3. Window: max 10 messages per LLM call
+    //   3. Token budget: max ~4000 tokens per LLM call (chars/4 heuristic)
     //   4. Reflection gating: only for subagent or delta >= 6
     // ======================================================================
 
@@ -252,7 +277,7 @@ const learnloopPlugin = {
         return;
       }
 
-      const window = delta.slice(-MAX_HISTORY_WINDOW);
+      const window = truncateToTokenBudget(delta);
 
       log.info(`learnloop: agent_end — session=${ctx.sessionKey} full=${fullHistory.length} delta=${delta.length} window=${window.length}`);
 
@@ -325,7 +350,7 @@ const learnloopPlugin = {
           session_key: sessionKey,
           task_type: 'subagent',
           task_summary: history[0]?.content?.slice(0, 200) ?? 'Sub-agent task',
-          conversation_history: history.slice(-MAX_HISTORY_WINDOW),
+          conversation_history: truncateToTokenBudget(history),
           signals: {
             user_feedback: null,
             review_result: event.outcome === 'ok' ? 'PASS' : (event.outcome === 'error' ? 'FAIL' : null),
