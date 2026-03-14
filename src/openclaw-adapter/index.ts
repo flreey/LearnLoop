@@ -5,7 +5,7 @@
  * OpenClaw's plugin lifecycle system via api.on() hooks.
  *
  * Hook mapping:
- *   beforeTurn  → before_agent_start  (inject memories as prependContext)
+ *   beforeTurn  → before_prompt_build  (inject memories as prependSystemContext)
  *   afterTask   → agent_end           (extract reflections from completed runs)
  *   beforeSpawn → subagent_spawning   (augment task description with reflections)
  *
@@ -139,20 +139,29 @@ const learnloopPlugin = {
     log.info(`learnloop: registered (db: ${plugin.config.dbPath})`);
 
     // ======================================================================
-    // Hook: before_agent_start → beforeTurn (inject memories)
+    // Hook: before_prompt_build → beforeTurn (inject memories)
     // ======================================================================
 
-    api.on('before_agent_start', async (
+    api.on('before_prompt_build', async (
       event: { prompt: string; messages?: unknown[] },
       ctx: { agentId?: string; sessionKey?: string },
     ) => {
-      if (!event.prompt || event.prompt.length < 5) return;
+      // Build conversation_context: prefer joined message text over raw prompt
+      let conversationContext: string;
+      if (Array.isArray(event.messages) && event.messages.length > 0) {
+        const parsed = parseHistory(event.messages);
+        conversationContext = parsed.map(m => m.content).join('\n').trim() || event.prompt;
+      } else {
+        conversationContext = event.prompt;
+      }
+
+      if (!conversationContext || conversationContext.length < 5) return;
       if (!ctx.sessionKey) return;
 
       try {
         const result = await plugin.beforeTurn({
           session_key: ctx.sessionKey,
-          conversation_context: event.prompt,
+          conversation_context: conversationContext,
           previous_session_key: null,
           previous_conversation_history: null,
         });
@@ -163,7 +172,7 @@ const learnloopPlugin = {
             .map(m => `- [${m.type}] ${m.content}`)
             .join('\n');
           return {
-            prependContext: `\n<learnloop_memories>\nRelevant memories from past sessions:\n${memoryBlock}\n</learnloop_memories>\n`,
+            prependSystemContext: `\n<learnloop_memories>\nRelevant memories from past sessions:\n${memoryBlock}\n</learnloop_memories>\n`,
           };
         }
       } catch (err) {

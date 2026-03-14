@@ -297,6 +297,16 @@
       "completed_count": 2,
       "task_count": 2,
       "status": "completed"
+    },
+    {
+      "id": 4,
+      "name": "Quick Dev: 两个优化任务：(1) 迁移 before_agent_start → befor...",
+      "type": "shared",
+      "status": "in_progress",
+      "depends": [],
+      "task_count": 2,
+      "completed_count": 1,
+      "file": "phases/phase-4.json"
     }
   ],
   "directory_structure": {
@@ -313,7 +323,15 @@
     "test/fixtures/": "Test fixtures (sample conversations, mock LLM responses)"
   },
   "current_focus": {
-    "phase_id": 3,
-    "task_id": "TASK-BE-3.2"
+    "phase_id": 4,
+    "task_id": "TASK-4.1"
+  },
+  "stats": {
+    "total_phases": 5,
+    "total_tasks": 19,
+    "completed_tasks": 18,
+    "pending_tasks": 1,
+    "blocked_tasks": 0,
+    "in_progress": 0
   }
 }
